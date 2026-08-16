@@ -1,34 +1,155 @@
 import AppKit
+import CMPV
+import OpenGL.GL
+import OpenGL.GL3
 import SwiftUI
 
-/// mpv 用 `--wid` 挂载的宿主 view。
+/// libmpv render API 的渲染宿主。
 ///
-/// 这里刻意保持成一个空壳：mpv 会在它内部自己建 layer 来画。
-/// 我们唯一要做的是保证它有稳定的地址和生命周期。
-final class MPVContainerView: NSView, NSViewLike {
+/// `--wid` 在 macOS 上不被支持（mpv 手册只列了 X11 / win32 / Android），
+/// 实测 mpv 会忽略它并自己开一个不受父窗口裁剪的窗口。
+/// 因此走 IINA 的路子：`--vo=libmpv` + `mpv_render_context`，由我们自己持有
+/// GL 上下文，mpv 只负责往我们给的 FBO 里画。几何和裁剪就完全归 AppKit 管了。
+///
+/// OpenGL 在 macOS 上已废弃但仍可用，且是 libmpv render API 在 macOS 上唯一
+/// 的硬件路径（render API 只有 OpenGL 和 SW 两种，SW 是 CPU 回读，太慢）。
+final class MPVGLView: NSOpenGLView {
 
-    var rawPointer: UnsafeMutableRawPointer { Unmanaged.passUnretained(self).toOpaque() }
+    private var renderContext: OpaquePointer?
+    private let mpvHandle: OpaquePointer?
 
-    /// mpv 挂载前先铺一层黑底，避免看到窗口默认背景。
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.black.cgColor
+    /// render context 建好后回调，此时才能 loadfile。
+    var onRenderContextReady: (() -> Void)?
+
+    init(frame: NSRect, mpvHandle: OpaquePointer?) {
+        self.mpvHandle = mpvHandle
+
+        let attributes: [NSOpenGLPixelFormatAttribute] = [
+            UInt32(NSOpenGLPFAOpenGLProfile), UInt32(NSOpenGLProfileVersion3_2Core),
+            UInt32(NSOpenGLPFAAccelerated),
+            UInt32(NSOpenGLPFADoubleBuffer),
+            UInt32(NSOpenGLPFAColorSize), 24,
+            UInt32(NSOpenGLPFAAlphaSize), 8,
+            0,
+        ]
+        guard let format = NSOpenGLPixelFormat(attributes: attributes) else {
+            fatalError("拿不到 OpenGL 3.2 Core pixel format")
+        }
+        super.init(frame: frame, pixelFormat: format)!
+        wantsBestResolutionOpenGLSurface = true
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    /// 只在第一次真正进入窗口层级时回调一次。
-    /// mpv 需要一个已经挂到 window 上的 view 才能正确建立渲染上下文。
-    var onAttachedToWindow: (() -> Void)?
-    private var didAttach = false
+    deinit {
+        if let renderContext {
+            mpv_render_context_free(renderContext)
+        }
+    }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil, !didAttach else { return }
-        didAttach = true
-        onAttachedToWindow?()
+    // MARK: - render context
+
+    override func prepareOpenGL() {
+        super.prepareOpenGL()
+
+        var swapInterval: GLint = 1
+        openGLContext?.setValues(&swapInterval, for: .swapInterval)
+
+        guard renderContext == nil, let mpvHandle else { return }
+
+        var initParams = mpv_opengl_init_params(
+            get_proc_address: { _, name in
+                guard let name else { return nil }
+                let symbol = CFStringCreateWithCString(kCFAllocatorDefault, name, kCFStringEncodingASCII)
+                guard let bundle = CFBundleGetBundleWithIdentifier("com.apple.opengl" as CFString)
+                else { return nil }
+                return CFBundleGetFunctionPointerForName(bundle, symbol)
+            },
+            get_proc_address_ctx: nil
+        )
+        let apiType = strdup(MPV_RENDER_API_TYPE_OPENGL)
+        defer { free(apiType) }
+
+        // 不开 ADVANCED_CONTROL：它要求调用方接管更多渲染时序，
+        // 履行不到位反而更容易和 mpv 核心互等。基础模式够用。
+        var context: OpaquePointer?
+        let status = withUnsafeMutablePointer(to: &initParams) { initPtr in
+            var params = [
+                mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: apiType),
+                mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: initPtr),
+                mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
+            ]
+            return mpv_render_context_create(&context, mpvHandle, &params)
+        }
+
+        guard status >= 0, let context else {
+            NSLog("mpv_render_context_create 失败: \(status)")
+            return
+        }
+        renderContext = context
+
+        // mpv 从自己的线程通知有新帧，必须转回主线程再画
+        mpv_render_context_set_update_callback(context, { ctx in
+            guard let ctx else { return }
+            let view = Unmanaged<MPVGLView>.fromOpaque(ctx).takeUnretainedValue()
+            DispatchQueue.main.async { view.renderFrame() }
+        }, Unmanaged.passUnretained(self).toOpaque())
+
+        onRenderContextReady?()
+    }
+
+    // MARK: - 绘制
+
+    override func draw(_ dirtyRect: NSRect) {
+        renderFrame(force: true)
+    }
+
+    override func reshape() {
+        super.reshape()
+        renderFrame(force: true)
+    }
+
+    func renderFrame(force: Bool = false) {
+        guard let renderContext, let glContext = openGLContext,
+              let cgl = glContext.cglContextObj
+        else { return }
+
+        if !force {
+            let flags = mpv_render_context_update(renderContext)
+            guard flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0 else { return }
+        }
+
+        glContext.makeCurrentContext()
+        CGLLockContext(cgl)
+        defer {
+            CGLUnlockContext(cgl)
+        }
+
+        var boundFBO: GLint = 0
+        glGetIntegerv(GLenum(GL_FRAMEBUFFER_BINDING), &boundFBO)
+
+        let scale = window?.backingScaleFactor ?? 2
+        var fbo = mpv_opengl_fbo(
+            fbo: Int32(boundFBO),
+            w: Int32(bounds.width * scale),
+            h: Int32(bounds.height * scale),
+            internal_format: 0
+        )
+        var flipY: CInt = 1
+
+        withUnsafeMutablePointer(to: &fbo) { fboPtr in
+            withUnsafeMutablePointer(to: &flipY) { flipPtr in
+                var params = [
+                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: fboPtr),
+                    mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: flipPtr),
+                    mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
+                ]
+                mpv_render_context_render(renderContext, &params)
+            }
+        }
+
+        glContext.flushBuffer()
     }
 }
 
@@ -36,14 +157,17 @@ struct MPVVideoView: NSViewRepresentable {
 
     let player: Player
 
-    func makeNSView(context: Context) -> MPVContainerView {
-        let view = MPVContainerView(frame: NSRect(x: 0, y: 0, width: 960, height: 540))
-        view.onAttachedToWindow = { [weak view] in
-            guard let view else { return }
-            player.attach(to: view)
+    func makeNSView(context: Context) -> MPVGLView {
+        let view = MPVGLView(
+            frame: NSRect(x: 0, y: 0, width: 960, height: 540),
+            mpvHandle: player.rawHandle
+        )
+        view.onRenderContextReady = { [weak view] in
+            guard view != nil else { return }
+            player.renderContextIsReady()
         }
         return view
     }
 
-    func updateNSView(_ nsView: MPVContainerView, context: Context) {}
+    func updateNSView(_ nsView: MPVGLView, context: Context) {}
 }

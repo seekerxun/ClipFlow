@@ -13,38 +13,45 @@
 - [x] `brew install mpv ffmpeg`，确认 `libmpv.dylib` 与 `mpv/client.h` 路径
 - [x] 工程搭起来，写 module map 链接 libmpv
 - [x] 构建配置探测 brew 前缀，不写死 `/opt/homebrew`
-- [x] 用 `--wid` 把 mpv 渲染到 `NSView`，`NSViewRepresentable` 包一层塞进 SwiftUI 窗口
+- [x] ~~用 `--wid` 把 mpv 渲染到 `NSView`~~ → **实测不可行，改走 render API**
+- [x] `vo=libmpv` + `mpv_render_context` + `NSOpenGLView`，`NSViewRepresentable` 包一层塞进 SwiftUI
 - [x] **放出一个 MKV 的画面**
 - [x] 验证播放 / 暂停 / seek 三个基本操作
-- [ ] 验证 SwiftUI 浮层画在 mpv 图层之上是否有 z-order / 闪烁问题 ← **需人眼确认**
+- [x] 验证 SwiftUI 浮层的 z-order / 闪烁 —— 正常
+- [x] 验证窗口缩放时几何跟随 —— 正常
 - [ ] 关闭 App Sandbox（spike 走 SPM 可执行文件，本就没沙盒；建正式 Xcode 工程时再落实）
 
-**完成标准：** SwiftUI 窗口里能播 MKV，能暂停，能拖动 seek，浮层行为已知。
+**完成标准：** SwiftUI 窗口里能播 MKV，能暂停，能拖动 seek，浮层行为已知。✅
 
-> 这一期若卡住超过一周，说明 `--wid` 路线不通，需要提前评估 render API + `CAMetalLayer` 方案，而不是硬撑。
+### V0 结论：`--wid` 不可行，render API 成立
 
-### V0 结论（已验证）
+代码在 [`Spike/`](Spike/)。`CLIPFLOW_SELFTEST=1 ./.build/debug/ClipFlowSpike` 跑自动验收。
 
-代码在 [`Spike/`](Spike/)，用 `CLIPFLOW_SELFTEST=1 ./.build/debug/ClipFlowSpike` 跑自动验收，**8/8 通过**：
+**最重要的发现：`--wid` 在 macOS 上根本不受支持。** mpv 手册里 `--wid` 只写了 X11、win32、Android，没有 macOS。实测 mpv 会忽略它，自己开一个独立窗口——带自己的圆角、不受父窗口裁剪、位置对不上，画面糊到别的 app 上面。原计划的渲染方案作废。
+
+换成 **`--vo=libmpv` + `mpv_render_context` + 自持 OpenGL 上下文**（IINA 的做法）后全部正常：
 
 | 验证项 | 结果 |
 |---|---|
-| mpv 挂载到 `NSView`（`--wid`） | 通过，mpv 0.41.0 |
+| render context 建立 | 通过，`VO: [libmpv]`，mpv 0.41.0 |
 | MKV 解析 | 通过，`mkv · H.264 · 1280×720 · 30fps` |
-| 播放推进 | 通过，1.2s 后 `time-pos = 1.00` |
-| 解码出真实画面 | 通过，`screenshot-to-file` 写出 566 KB PNG |
+| 画面渲染在窗口内 | 通过，正确裁剪，无溢出 |
+| 窗口缩放跟随 | 通过，缩到 760×520 后几何正确 |
+| SwiftUI 浮层 z-order | 通过，无闪烁，且能被 `screencapture` 抓到 |
+| 播放推进 | 通过 |
 | 暂停冻结 | 通过，0.9s 间隔内 `time-pos` 纹丝不动 |
 | 精确 seek（`hr-seek`） | 通过，seek 到 5.0s **落在第 150 帧 = 5.000s，帧级精确** |
-| seek 后取帧 | 通过 |
-| 从暂停恢复播放 | 通过，5.00 → 5.93 |
+| 从暂停恢复播放 | 通过，5.00 → 5.97 |
 
-**`--wid` 路线成立，V1 按原计划走。** render API + `CAMetalLayer` 暂不需要。
+踩到的坑：
 
-踩到的三个点：
-
-1. **不需要 pkg-config。** SPM 的 `pkgConfig:` 要求装 pkg-config/pkgconf，而 macOS 默认没有。改成在 `Package.swift` 里用 `FileManager` 探测 `/opt/homebrew` 与 `/usr/local`，构建依赖就只剩 brew 和 mpv 本身。
-2. **Homebrew 的 bottle 是按 macOS 版本构建的。** 在 macOS 26 上装的 `libmpv.2.dylib` 标记为 26.0，链接时会警告与我们声明的最低版本 15.0 不符。源码分发不受影响（每台机器装自己的 bottle），但**不能把在新系统上构建的二进制直接发给旧系统的人**。
-3. **`swift run` 的 stdout 在重定向时是块缓冲的**，进程挂起时一个字都看不到。自测入口加了 `setvbuf(stdout, nil, _IONBF, 0)`。
+1. **同步 `mpv_command` 会死锁。** 主线程调命令阻塞 → mpv 核心等 VO 出帧 → 出帧要靠主线程回调 `mpv_render_context_render` → 主线程正卡在命令里。`screenshot` 必挂。**一律用 `mpv_command_async`。**
+2. **别开 `MPV_RENDER_PARAM_ADVANCED_CONTROL`。** 它要求调用方接管更多渲染时序，履行不到位反而更容易和核心互等。
+3. **`--vo=libmpv` 下 mpv 自己的 `screenshot` 不产出文件。** 对本项目无影响——缩略图走 AVFoundation / ffmpeg，从不经过 mpv。
+4. **不需要 pkg-config。** SPM 的 `pkgConfig:` 要求装 pkg-config/pkgconf，macOS 默认没有。改成在 `Package.swift` 里用 `FileManager` 探测 `/opt/homebrew` 与 `/usr/local`。
+5. **Homebrew bottle 按 macOS 版本构建。** macOS 26 上装的 `libmpv.2.dylib` 标记为 26.0，与声明的最低版本 15.0 不符时链接器会警告。源码分发不受影响，但**不能把新系统构建的二进制发给旧系统的人**。
+6. **`swift run` 的 stdout 重定向时是块缓冲的**，挂起时一个字都看不到。自测入口需 `setvbuf(stdout, nil, _IONBF, 0)`。
+7. **OpenGL 自 macOS 10.14 起废弃**，但 libmpv render API 在 macOS 上只有 OpenGL 和 SW 两种，SW 是 CPU 回读太慢。所以只能用 OpenGL，IINA 亦然。渲染后端要藏在 protocol 后面，为将来留退路。
 
 ---
 
@@ -93,9 +100,11 @@
 
 ### 5. 播放
 
-- [ ] `MPVRenderBackend` protocol + `MPVWidBackend` 实现（渲染后端必须可替换）
+- [ ] `MPVRenderBackend` protocol + `MPVGLBackend` 实现（渲染后端必须可替换）
+- [ ] 从 spike 搬运：render context 建立、update callback、`reshape` 重绘
 - [ ] `PlaybackController`（`@Observable`），单实例 + `loadfile`
-- [ ] 启动参数：`--idle=yes --keep-open=yes --hr-seek=yes --cache=yes`
+- [ ] 启动参数：`--vo=libmpv --idle=yes --keep-open=yes --hr-seek=yes --cache=yes`
+- [ ] 所有 mpv 命令走 `mpv_command_async`（同步版本会死锁）
 - [ ] 监听 `end-file` 事件驱动自动播放下一个（不用 mpv 的 playlist）
 - [ ] 播放 / 暂停 / seek / 音量 / 静音 / 倍速
 - [ ] 循环模式：单个循环 / 列表循环 / 关闭
@@ -111,6 +120,8 @@
 - [ ] `TransportBar` 播放控制条
 - [ ] `KeyBindings` 全套快捷键（见 README 第 8 节）
 - [ ] 选中即播模型：`Q`/`E` 移动选中项即切换视频
+- [ ] 建正式 Xcode 工程，关闭 App Sandbox
+- [ ] 应用图标：`swift Tools/make-icon.swift icon.png Tools/out` 生成 `.icns` 后放进 bundle
 
 ### V1 完成标准
 
@@ -174,7 +185,9 @@
 | App Sandbox | 不启用 |
 | libmpv 来源 | V1 动态链接 Homebrew 的 `libmpv`，README 写明前置依赖 |
 | GPL / 分发处理 | 推迟，不阻塞 V1 |
-| 渲染方式 | V1 用 `--wid`，但藏在 protocol 后面保证可替换 |
+| 渲染方式 | `--vo=libmpv` + `mpv_render_context` + 自持 OpenGL 上下文。**`--wid` 在 macOS 上不受支持,已实测作废**。后端藏在 protocol 后面保证可替换 |
+| mpv 命令调用 | **一律 `mpv_command_async`**。同步版本在 render API 下会死锁 |
+| 应用图标 | 源 `icon.png` 无 alpha,圆角外是纯黑,必须先抠透。`Tools/make-icon.swift` 负责生成 `.icns` |
 | 缩略图生成 | AVFoundation 主路径 + ffmpeg 回退，**不用 libmpv** |
 | 精灵图抽帧 | 只解关键帧（`-skip_frame nokey` / `tolerance = .infinity`）；24 帧的实际时间戳存进索引 |
 | 封面帧选取 | 时间窗口 [35%, 80%] + 纯色剔除，约 40 行。dHash、跨文件片头聚类、Sobel、色彩丰富度**全部作废** |

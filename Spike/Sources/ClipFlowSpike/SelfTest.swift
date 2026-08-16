@@ -15,10 +15,10 @@ enum SelfTest {
         setvbuf(stdout, nil, _IONBF, 0)
         print("\n=== ClipFlow V0 自测开始 ===\n")
 
-        guard await waitUntil(timeout: 5, { player.isAttached }) else {
-            return finish(fatal: "mpv 未能挂载到 NSView（--wid 失败）：\(player.status)")
+        guard await waitUntil(timeout: 8, { player.isAttached }) else {
+            return finish(fatal: "render context 未建立：\(player.status)")
         }
-        record("mpv 挂载到 NSView (--wid)", passed: true, detail: player.status)
+        record("render context 建立 (vo=libmpv + OpenGL)", passed: true, detail: player.status)
 
         guard await waitUntil(timeout: 15, { player.didLoadFile && player.duration > 0 }) else {
             return finish(fatal: "文件加载超时。状态：\(player.status)")

@@ -21,14 +21,11 @@ final class Player {
     @ObservationIgnored private var pendingFile: String?
     @ObservationIgnored private(set) var didLoadFile = false
 
+    /// 走 render API 后，mpv 不再需要任何 NSView，因此可以在 init 里就建好。
+    /// 顺序：create → 设选项（含 vo=libmpv）→ initialize，
+    /// 之后 GL view 建 render context，ready 了才 loadfile。
     init(initialFile: String?) {
         pendingFile = initialFile
-    }
-
-    /// 由 `MPVContainerView` 在进入窗口层级后调用一次。
-    /// 顺序不能变：create → 设选项 → 设 wid → initialize → loadfile。
-    func attach(to view: MPVContainerView) {
-        guard !isAttached else { return }
 
         guard mpv.create() else {
             status = "mpv_create() 失败"
@@ -36,6 +33,7 @@ final class Player {
         }
 
         // 只能在 initialize 之前设的选项
+        mpv.setOption("vo", "libmpv")                   // 交给 render API，不要 mpv 自己开窗
         mpv.setOption("terminal", "no")
         mpv.setOption("input-default-bindings", "no")   // 键盘由 SwiftUI 接管
         mpv.setOption("input-vo-keyboard", "no")
@@ -44,10 +42,7 @@ final class Player {
         mpv.setOption("idle", "yes")                    // 播完不退出实例
         mpv.setOption("keep-open", "yes")               // 播完停在最后一帧
         mpv.setOption("hr-seek", "yes")                 // 精确 seek
-        mpv.setOption("force-window", "yes")            // 未加载时也铺一层黑底
         mpv.setOption("hwdec", "auto-safe")
-
-        mpv.setParentView(view)
 
         guard mpv.initialize() else {
             status = "mpv_initialize() 失败"
@@ -55,8 +50,16 @@ final class Player {
         }
 
         wireCallbacks()
+        status = "mpv 已初始化，等待 render context"
+    }
+
+    var rawHandle: OpaquePointer? { mpv.rawHandle }
+
+    /// 由 `MPVGLView` 在 `mpv_render_context_create` 成功后调用。
+    func renderContextIsReady() {
+        guard !isAttached else { return }
         isAttached = true
-        status = "mpv 已挂载（--wid）"
+        status = "render context 就绪（vo=libmpv）"
 
         if let pendingFile {
             self.pendingFile = nil

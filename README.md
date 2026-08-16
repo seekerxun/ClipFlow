@@ -98,21 +98,46 @@ ffmpeg -y -f lavfi -i "testsrc2=size=1280x720:rate=30" -f lavfi -i "sine=frequen
 
 > **原则：不根据扩展名限制播放能力，优先让 libmpv 尝试解析文件。**
 
-### 渲染后端
+### 渲染后端：render API（`--wid` 在 macOS 上不可用）
 
-V1 走 `--wid`：把 mpv 渲染到一个 `NSView`，外面用 `NSViewRepresentable` 包一层。实现简单，风险低。
+**`--wid` 不要用。** mpv 手册里 `--wid` 只写了 X11、win32、Android 三个平台，**没有 macOS**。V0 实测确认：mpv 会忽略这个选项，自己开一个独立窗口——带自己的圆角、不受父窗口裁剪、位置对不上，画面会糊到别的 app 上面去。
 
-但**必须把渲染后端藏在一个 protocol（`MPVRenderBackend`）后面**，`PlaybackController` 只依赖抽象。将来若要换成 libmpv render API + `CAMetalLayer`（IINA 的做法，支持多实例和更精细的控制），不会动到播放逻辑。
+正确做法是 IINA 那条路：**`--vo=libmpv` + `mpv_render_context`**，由我们自己持有 GL 上下文，mpv 只往我们给的 FBO 里画。几何、裁剪、层级就全部归 AppKit 管，`NSViewRepresentable` 包一层塞进 SwiftUI 即可。
 
-已知坑：`--wid` 模式下 mpv 在 NSView 里挂自己的 CALayer，SwiftUI 画在其上的浮层（控制条、hover 预览）偶尔会有 z-order 或闪烁问题。因此浮层设计要克制——这也是把进度条预览做成"读预生成精灵图"而非"实时解码"的动机之一。
+- 渲染 API 只有 **OpenGL** 和 **SW** 两种。SW 是 CPU 回读，太慢。所以 macOS 上只能用 OpenGL——虽然自 10.14 起标记废弃，但仍可用，IINA 也是这么做的。
+- 宿主用 `NSOpenGLView`，在 `prepareOpenGL()` 里建 render context，`reshape()` 里重画。窗口缩放由 AppKit 正常处理，V0 已验证。
+- SwiftUI 浮层压在上面表现正常，无闪烁、无 z-order 问题，且能被 `screencapture` 正常抓到（mpv 自己的窗口抓不到）。
+
+**必须把渲染后端藏在一个 protocol 后面**，`PlaybackController` 只依赖抽象。将来 OpenGL 真被移除时，换成别的实现不会动到播放逻辑。
+
+### 致命坑：命令必须用 `mpv_command_async`
+
+用 render API 时，从主线程发同步的 `mpv_command` 会**死锁**：
+
+```
+主线程调 mpv_command 阻塞
+  → mpv 核心等 VO(libmpv) 出帧
+    → 出帧要靠主线程回调 mpv_render_context_render
+      → 但主线程正卡在 mpv_command 里
+```
+
+V0 实测 `screenshot` 命令必挂。**一律用 `mpv_command_async`**，别留例外。
+
+另外别开 `MPV_RENDER_PARAM_ADVANCED_CONTROL`：它要求调用方接管更多渲染时序，履行不到位反而更容易和 mpv 核心互等。基础模式够用。
+
+> 附带发现：`--vo=libmpv` 下 mpv 自己的 `screenshot` 命令不产出文件。对本项目无影响——缩略图走 AVFoundation / ffmpeg，从不经过 mpv。
 
 ### 关键启动参数
 
 ```
+--vo=libmpv           交给 render API，绝不能让 mpv 自己开窗
 --idle=yes            空闲时保持实例存活
 --keep-open=yes       播完不退出，由 end-file 事件驱动自动下一个
 --hr-seek=yes         精确 seek，拖动进度条不跳关键帧
 --cache=yes
+--hwdec=auto-safe     macOS 上会走 videotoolbox
+--osc=no              不要 mpv 自带控制条
+--input-default-bindings=no / --input-vo-keyboard=no   键盘归 SwiftUI
 ```
 
 `keep-open` 是必须的，否则播放结束会直接销毁窗口。自动播放下一个通过监听 `end-file` 事件自行控制，不交给 mpv 的 playlist。
@@ -362,9 +387,9 @@ ClipFlow/
 │   └── AppEnvironment.swift
 │
 ├── Player/
-│   ├── MPVClient.swift              # libmpv C API 薄封装
+│   ├── MPVClient.swift              # libmpv C API 薄封装（命令一律 async）
 │   ├── MPVRenderBackend.swift       # protocol：渲染后端抽象
-│   ├── MPVWidBackend.swift          # V1 实现：--wid + NSView
+│   ├── MPVGLBackend.swift           # 实现：vo=libmpv + mpv_render_context + OpenGL
 │   ├── MPVVideoView.swift           # NSViewRepresentable
 │   └── PlaybackController.swift     # 播放状态机（@Observable）
 │

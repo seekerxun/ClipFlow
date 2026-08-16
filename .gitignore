@@ -34,3 +34,6 @@ Package.resolved
 # V0 spike 的生成物
 Spike/out/
 Spike/sample.mkv
+
+# 图标生成物（用 Tools/make-icon.swift 从 icon.png 重新生成）
+Tools/out/

@@ -26,11 +26,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
+        // SPM 可执行文件没有 bundle，也就没有 Resources / CFBundleIconFile，
+        // Dock 只会给一个系统默认占位图标。运行时直接塞一张图是唯一的办法。
+        // 正式的 .icns 要等 V1 建 Xcode 工程、有了 .app bundle 之后。
+        // 优先用 Tools/make-icon.swift 抠过透明的版本；源 icon.png 没有 alpha，
+        // 圆角外面是纯黑，直接用会在 Dock 里显示成黑方块。
+        for candidate in ["../Tools/out/icon-1024.png", "../icon.png", "icon.png"] {
+            if let image = NSImage(contentsOfFile: candidate) {
+                NSApp.applicationIconImage = image
+                break
+            }
+        }
+
         // 打印窗口号，方便外部用 screencapture -l <n> 抓这个窗口做 z-order 验证
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             setvbuf(stdout, nil, _IONBF, 0)
-            if let number = NSApp.windows.first(where: { $0.isVisible })?.windowNumber {
-                print("WINDOW_NUMBER=\(number)")
+            guard let window = NSApp.windows.first(where: { $0.isVisible }) else { return }
+            print("WINDOW_NUMBER=\(window.windowNumber)")
+
+            // 几何是 --wid 路线的败因，这里留个自动缩放的钩子来验证 render API
+            // 是否跟得住窗口尺寸变化。用法：CLIPFLOW_RESIZE=700x500
+            guard let spec = ProcessInfo.processInfo.environment["CLIPFLOW_RESIZE"] else { return }
+            let parts = spec.split(separator: "x").compactMap { Double($0) }
+            guard parts.count == 2 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                var frame = window.frame
+                frame.size = NSSize(width: parts[0], height: parts[1])
+                window.setFrame(frame, display: true, animate: false)
+                print("RESIZED=\(Int(parts[0]))x\(Int(parts[1]))")
             }
         }
     }

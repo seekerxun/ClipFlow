@@ -27,14 +27,8 @@ final class MPVClient {
         return handle != nil
     }
 
-    /// 必须在 `initialize()` 之前调用。
-    ///
-    /// mpv 会把画面渲染进这个 NSView。传的是裸指针，因此调用方必须保证
-    /// 该 view 的生命周期长于 mpv 实例。
-    func setParentView(_ view: NSViewLike) {
-        var wid = Int64(Int(bitPattern: view.rawPointer))
-        mpv_set_option(handle, "wid", MPV_FORMAT_INT64, &wid)
-    }
+    /// 供 `mpv_render_context_create` 使用。
+    var rawHandle: OpaquePointer? { handle }
 
     func setOption(_ name: String, _ value: String) {
         mpv_set_option_string(handle, name, value)
@@ -68,6 +62,11 @@ final class MPVClient {
 
     // MARK: - 命令
 
+    /// 一律走 `mpv_command_async`。
+    ///
+    /// 用 render API 时，同步的 `mpv_command` 从主线程发出会死锁：
+    /// 命令阻塞主线程 → mpv 核心等 VO(libmpv) 出帧 → 出帧要靠主线程回调
+    /// `mpv_render_context_render` → 主线程正卡在命令里。实测 screenshot 必挂。
     @discardableResult
     func command(_ args: [String]) -> Int32 {
         guard handle != nil else { return -1 }
@@ -78,7 +77,7 @@ final class MPVClient {
         return cargs.withUnsafeMutableBufferPointer { buf in
             buf.baseAddress!.withMemoryRebound(
                 to: UnsafePointer<CChar>?.self, capacity: buf.count
-            ) { mpv_command(handle, $0) }
+            ) { mpv_command_async(handle, 0, $0) }
         }
     }
 
@@ -177,9 +176,4 @@ final class MPVClient {
             break
         }
     }
-}
-
-/// 只为了把 AppKit 依赖挡在 MPVClient 外面——它只需要一个裸指针。
-protocol NSViewLike: AnyObject {
-    var rawPointer: UnsafeMutableRawPointer { get }
 }
