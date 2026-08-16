@@ -67,6 +67,27 @@ brew install mpv ffmpeg
 
 动态链接 + 用户自备 mpv 的模式下，GPL 的传染性问题基本不需要碰。
 
+两个实测得到的注意事项：
+
+- **不要用 SPM 的 `pkgConfig:`。** 它要求装 pkg-config / pkgconf，而 macOS 默认没有。直接用 `FileManager` 探测 `/opt/homebrew` 和 `/usr/local` 下的 `include/mpv/client.h` 即可，构建依赖就只剩 brew 和 mpv 本身。
+- **Homebrew 的 bottle 按 macOS 版本构建。** 在 macOS 26 上装到的 `libmpv.2.dylib` 标记为 26.0，与声明的最低版本 15.0 不符时链接器会警告。源码分发不受影响（每台机器装自己的 bottle），但**不能把在新系统上构建出的二进制直接发给旧系统的人**。
+
+### 跑 V0 spike
+
+```bash
+cd Spike && swift build && CLIPFLOW_SELFTEST=1 ./.build/debug/ClipFlowSpike
+```
+
+自测需要一个测试用 MKV（未入库，3 MB）：
+
+```bash
+ffmpeg -y -f lavfi -i "testsrc2=size=1280x720:rate=30" -f lavfi -i "sine=frequency=440" -t 8 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest Spike/sample.mkv
+```
+
+`testsrc2` 会把时间码和帧号烧进画面，seek 精度可以直接从截图上读出来。
+
+去掉 `CLIPFLOW_SELFTEST=1` 则进入交互模式：空格播放/暂停，左右方向键 ±5s，上下 ±30s。
+
 ---
 
 ## 3. 播放内核

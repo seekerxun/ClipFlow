@@ -30,3 +30,7 @@ Package.resolved
 
 # 运行时产物
 *.log
+
+# V0 spike 的生成物
+Spike/out/
+Spike/sample.mkv

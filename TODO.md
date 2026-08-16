@@ -10,18 +10,41 @@
 
 整个项目押在 libmpv 上，而集成方式尚未验证。这一期**只做一件事**，代码写完可以全部丢掉。
 
-- [ ] `brew install mpv ffmpeg`，确认 `libmpv.dylib` 与 `mpv/client.h` 路径
-- [ ] Xcode 工程搭起来，写 module map 链接 libmpv
-- [ ] 构建配置用 `brew --prefix` 探测前缀，不写死 `/opt/homebrew`
-- [ ] 关闭 App Sandbox
-- [ ] 用 `--wid` 把 mpv 渲染到 `NSView`，`NSViewRepresentable` 包一层塞进 SwiftUI 窗口
-- [ ] **放出一个 MKV 的画面**
-- [ ] 验证播放 / 暂停 / seek 三个基本操作
-- [ ] 验证 SwiftUI 浮层画在 mpv 图层之上是否有 z-order / 闪烁问题
+- [x] `brew install mpv ffmpeg`，确认 `libmpv.dylib` 与 `mpv/client.h` 路径
+- [x] 工程搭起来，写 module map 链接 libmpv
+- [x] 构建配置探测 brew 前缀，不写死 `/opt/homebrew`
+- [x] 用 `--wid` 把 mpv 渲染到 `NSView`，`NSViewRepresentable` 包一层塞进 SwiftUI 窗口
+- [x] **放出一个 MKV 的画面**
+- [x] 验证播放 / 暂停 / seek 三个基本操作
+- [ ] 验证 SwiftUI 浮层画在 mpv 图层之上是否有 z-order / 闪烁问题 ← **需人眼确认**
+- [ ] 关闭 App Sandbox（spike 走 SPM 可执行文件，本就没沙盒；建正式 Xcode 工程时再落实）
 
 **完成标准：** SwiftUI 窗口里能播 MKV，能暂停，能拖动 seek，浮层行为已知。
 
 > 这一期若卡住超过一周，说明 `--wid` 路线不通，需要提前评估 render API + `CAMetalLayer` 方案，而不是硬撑。
+
+### V0 结论（已验证）
+
+代码在 [`Spike/`](Spike/)，用 `CLIPFLOW_SELFTEST=1 ./.build/debug/ClipFlowSpike` 跑自动验收，**8/8 通过**：
+
+| 验证项 | 结果 |
+|---|---|
+| mpv 挂载到 `NSView`（`--wid`） | 通过，mpv 0.41.0 |
+| MKV 解析 | 通过，`mkv · H.264 · 1280×720 · 30fps` |
+| 播放推进 | 通过，1.2s 后 `time-pos = 1.00` |
+| 解码出真实画面 | 通过，`screenshot-to-file` 写出 566 KB PNG |
+| 暂停冻结 | 通过，0.9s 间隔内 `time-pos` 纹丝不动 |
+| 精确 seek（`hr-seek`） | 通过，seek 到 5.0s **落在第 150 帧 = 5.000s，帧级精确** |
+| seek 后取帧 | 通过 |
+| 从暂停恢复播放 | 通过，5.00 → 5.93 |
+
+**`--wid` 路线成立，V1 按原计划走。** render API + `CAMetalLayer` 暂不需要。
+
+踩到的三个点：
+
+1. **不需要 pkg-config。** SPM 的 `pkgConfig:` 要求装 pkg-config/pkgconf，而 macOS 默认没有。改成在 `Package.swift` 里用 `FileManager` 探测 `/opt/homebrew` 与 `/usr/local`，构建依赖就只剩 brew 和 mpv 本身。
+2. **Homebrew 的 bottle 是按 macOS 版本构建的。** 在 macOS 26 上装的 `libmpv.2.dylib` 标记为 26.0，链接时会警告与我们声明的最低版本 15.0 不符。源码分发不受影响（每台机器装自己的 bottle），但**不能把在新系统上构建的二进制直接发给旧系统的人**。
+3. **`swift run` 的 stdout 在重定向时是块缓冲的**，进程挂起时一个字都看不到。自测入口加了 `setvbuf(stdout, nil, _IONBF, 0)`。
 
 ---
 
