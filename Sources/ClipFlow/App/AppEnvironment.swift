@@ -25,9 +25,6 @@ enum BrowserSort: String, CaseIterable, Identifiable {
 @Observable
 final class AppEnvironment {
     private enum Pref {
-        static let lastFolder = "lastFolderPath"
-        static let lastFolders = "lastFolderPaths"
-        static let lastFiles = "lastFilePaths"
         static let sidebarWidth = "sidebarWidth"
         static let browserOnRight = "browserOnRight"
         static let showsGrid = "showsGrid"
@@ -70,7 +67,6 @@ final class AppEnvironment {
 
     @ObservationIgnored private let folderWatcher = FolderWatcher()
     @ObservationIgnored private var folderGeneration = 0
-    @ObservationIgnored private var didAttemptRestore = false
     @ObservationIgnored private var folderRoots: [URL] = []
     @ObservationIgnored private var looseFiles: [URL] = []
     @ObservationIgnored private var sourceTask: Task<Void, Never>?
@@ -122,9 +118,11 @@ final class AppEnvironment {
         folderWatcher.onDebouncedChange = { [weak self] in
             self?.handleFolderChange()
         }
+        defaults.removeObject(forKey: "lastFolderPath")
+        defaults.removeObject(forKey: "lastFolderPaths")
+        defaults.removeObject(forKey: "lastFilePaths")
         Task {
             await index.load()
-            await self.restoreLastSourcesIfNeeded()
         }
     }
 
@@ -161,7 +159,6 @@ final class AppEnvironment {
             MediaScanner.collect(from: urls)
         }.value
         recordSources(from: urls)
-        persistSources()
         await appendItems(result.items)
         startWatchingCurrentRoots()
         Task {
@@ -169,22 +166,6 @@ final class AppEnvironment {
             guard gen == folderGeneration else { return }
             thumbnails.armIdleFill()
         }
-    }
-
-    private func restoreLastSourcesIfNeeded() async {
-        guard !didAttemptRestore else { return }
-        didAttemptRestore = true
-        guard items.isEmpty else { return }
-        var folders = UserDefaults.standard.stringArray(forKey: Pref.lastFolders) ?? []
-        var files = UserDefaults.standard.stringArray(forKey: Pref.lastFiles) ?? []
-        if folders.isEmpty, files.isEmpty,
-           let old = UserDefaults.standard.string(forKey: Pref.lastFolder), !old.isEmpty {
-            folders = [old]
-        }
-        let urls = folders.map { URL(fileURLWithPath: $0) }
-            + files.map { URL(fileURLWithPath: $0) }
-        guard !urls.isEmpty else { return }
-        await addURLs(urls)
     }
 
     func applyWindowChrome() {
@@ -209,18 +190,6 @@ final class AppEnvironment {
                 looseFiles.append(URL(fileURLWithPath: path))
             }
         }
-    }
-
-    private func persistSources() {
-        UserDefaults.standard.set(
-            folderRoots.map { $0.path(percentEncoded: false) },
-            forKey: Pref.lastFolders
-        )
-        UserDefaults.standard.set(
-            looseFiles.map { $0.path(percentEncoded: false) },
-            forKey: Pref.lastFiles
-        )
-        UserDefaults.standard.removeObject(forKey: Pref.lastFolder)
     }
 
     private func startWatchingCurrentRoots() {
@@ -268,7 +237,6 @@ final class AppEnvironment {
 
         folderRoots = roots.filter { Self.isExistingDirectory($0) }
         looseFiles = files.filter { Self.isExistingFile($0) }
-        persistSources()
         await applyIncrementalScan(result)
         startWatchingCurrentRoots()
     }
