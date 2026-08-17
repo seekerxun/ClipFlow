@@ -6,6 +6,40 @@
 
 ---
 
+## 当前进度
+
+> 接手前请先读 [`AGENTS.md`](AGENTS.md) 与 [`README.md`](README.md)。
+> 设计以 README 为准，**不要根据聊天记录推断当前设计**——README 里有几条结论是被实测推翻后改写过的。
+
+| 阶段 | 状态 |
+|---|---|
+| **V0** 风险验证 | ✅ 完成。`--wid` 实测不可行，已改走 render API |
+| **V1** 可用 | 🔵 进行中，第 1–4 块已完成并实测达标 |
+| └ 1. 扫描与索引 | ✅ 完成（差界面入口） |
+| └ 2. 精灵图流水线 | ✅ 完成（ffmpeg 回退路径暂缓） |
+| └ 3. 封面帧选取 | ✅ 完成（差 `C` 键与偏好设置，都要等界面） |
+| └ 4. 调度 | 🔵 并发上限与两阶段拆分已完成；**可见优先级调度未做**，要跟界面一起 |
+| └ **5. 播放** | ⬜ **未开始 ← 下一步** |
+| └ **6. 界面与输入** | ⬜ **未开始 ← 下一步** |
+| **V1.1 / V2 / 暂缓** | ⬜ 未开始 |
+
+已跑通并可复现的部分：
+
+```bash
+brew install mpv ffmpeg xcodegen
+xcodegen generate
+xcodebuild -project ClipFlow.xcodeproj -scheme ClipFlow -configuration Debug -derivedDataPath .build/dd build
+CLIPFLOW_BENCH="/path/to/videos" .build/dd/Build/Products/Debug/ClipFlow.app/Contents/MacOS/ClipFlow
+```
+
+V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程，**播放部分要从那里搬运**——渲染上下文的建立、更新回调、重绘都已经验证过。
+
+### 下一步要做什么
+
+按顺序做 V1 的第 5、6 块：先让画面能放出来，再把素材墙和键盘操作搭上。做完的判据是「能用键盘从头到尾扫完一个真实目录」，详见 V1 完成标准。
+
+---
+
 ## V0 — 风险验证（第一周）
 
 整个项目押在 libmpv 上，而集成方式尚未验证。这一期**只做一件事**，代码写完可以全部丢掉。
