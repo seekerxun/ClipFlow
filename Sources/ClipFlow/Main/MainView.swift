@@ -41,6 +41,36 @@ struct MainView: View {
             .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
             TransportBar(controller: env.playback)
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !env.isBrowserVisible {
+                showBrowserBar
+            }
+        }
+    }
+
+    /// 浏览区收起后仍留在播放区顶部，和标题上的收起箭头成对。
+    private var showBrowserBar: some View {
+        HStack(spacing: 8) {
+            if env.browserOnRight {
+                Spacer(minLength: 0)
+            }
+            Button {
+                env.isBrowserVisible = true
+            } label: {
+                Label("显示素材", systemImage: env.browserOnRight ? "chevron.left" : "chevron.right")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .focusable(false)
+            .help("显示素材浏览区")
+            .accessibilityLabel("显示素材浏览区")
+            if !env.browserOnRight {
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.bar)
     }
 
     private var splitter: some View {

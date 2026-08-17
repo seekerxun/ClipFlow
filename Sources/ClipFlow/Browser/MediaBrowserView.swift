@@ -35,11 +35,12 @@ struct MediaBrowserView: View {
             Button {
                 env.isBrowserVisible = false
             } label: {
-                Image(systemName: "xmark")
+                Image(systemName: env.browserOnRight ? "chevron.right" : "chevron.left")
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .help("隐藏素材浏览区")
+            .help("收起素材浏览区")
+            .accessibilityLabel("收起素材浏览区")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
