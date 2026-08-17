@@ -143,6 +143,8 @@ final class ClipFlowKeyView: NSView {
     private var observers: [NSObjectProtocol] = []
     private var isMenuTracking = false
     private static var didRestoreFrame = false
+    /// 启动后短暂把焦点从搜索框抢回，避免一打开就在输入。
+    private static var launchFocusUntil: Date?
 
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { false }
@@ -164,8 +166,12 @@ final class ClipFlowKeyView: NSView {
                 }
                 window.setFrameAutosaveName("ClipFlowMain")
             }
+            if Self.launchFocusUntil == nil {
+                Self.launchFocusUntil = Date().addingTimeInterval(0.35)
+            }
+            window?.initialFirstResponder = self
             DispatchQueue.main.async { [weak self] in
-                self?.reclaimKeyFocus()
+                self?.claimLaunchFocusIfNeeded()
                 self?.env?.applyWindowChrome()
             }
         } else {
@@ -363,6 +369,29 @@ final class ClipFlowKeyView: NSView {
         if isEditingText(in: window) { return }
         if window.firstResponder === self { return }
         window.makeFirstResponder(self)
+    }
+
+    /// 启动时系统会把第一个输入框当成默认焦点。这段时间内即便搜索框已经在编辑，也交还给收键视图；之后点搜索仍可输入。
+    private func claimLaunchFocusIfNeeded() {
+        guard let until = Self.launchFocusUntil, Date() < until else {
+            reclaimKeyFocus()
+            return
+        }
+        guard !isMenuTracking else {
+            DispatchQueue.main.async { [weak self] in self?.claimLaunchFocusIfNeeded() }
+            return
+        }
+        guard let window, window.isKeyWindow else {
+            DispatchQueue.main.async { [weak self] in self?.claimLaunchFocusIfNeeded() }
+            return
+        }
+        if NSApp.modalWindow != nil { return }
+        window.initialFirstResponder = self
+        window.endEditing(for: nil)
+        window.makeFirstResponder(self)
+        DispatchQueue.main.async { [weak self] in
+            self?.claimLaunchFocusIfNeeded()
+        }
     }
 }
 
