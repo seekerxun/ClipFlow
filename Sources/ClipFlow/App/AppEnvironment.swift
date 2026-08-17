@@ -163,6 +163,32 @@ final class AppEnvironment {
         let result = await Task.detached {
             MediaScanner.scan(root: scanned)
         }.value
+        await applyOpenedScan(result, gen: gen, watchPath: path)
+    }
+
+    /// 拖入的视频文件：只按路径建列表并播放，不复制、不移动、不删除原文件。
+    func openFiles(_ urls: [URL]) async {
+        folderGeneration += 1
+        let gen = folderGeneration
+        folderWatcher.stop()
+
+        folderURL = nil
+        applyWindowChrome()
+
+        thumbnails.reset(items: [])
+        playback.pause()
+        selectedID = nil
+        records = [:]
+        searchText = ""
+
+        let files = urls.map { URL(fileURLWithPath: $0.path(percentEncoded: false)) }
+        let result = await Task.detached {
+            MediaScanner.items(fromFiles: files)
+        }.value
+        await applyOpenedScan(result, gen: gen, watchPath: nil)
+    }
+
+    private func applyOpenedScan(_ result: MediaScanner.Result, gen: Int, watchPath: String?) async {
         guard gen == folderGeneration else { return }
 
         items = result.items
@@ -182,7 +208,9 @@ final class AppEnvironment {
             select(first)
         }
 
-        folderWatcher.start(path: path)
+        if let watchPath {
+            folderWatcher.start(path: watchPath)
+        }
 
         Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
@@ -403,7 +431,7 @@ final class AppEnvironment {
         }
     }
 
-    // MARK: - C 键封面
+    // MARK: - B 键封面
 
     /// 把当前播放帧写成封面。走 AVFoundation，不用 mpv screenshot。
     func captureCoverFromCurrentFrame() {

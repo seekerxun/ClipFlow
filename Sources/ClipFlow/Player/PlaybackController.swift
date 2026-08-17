@@ -44,6 +44,10 @@ final class PlaybackController {
     private(set) var volume: Double = 100
     private(set) var speed: Double = 1
     private(set) var loopMode: LoopMode = .off
+    /// 片段循环起点。只按当前播放时间设，不跟进度条点击走。
+    private(set) var loopA: Double?
+    /// 片段循环终点。
+    private(set) var loopB: Double?
     private(set) var isLoaded: Bool = false
     private(set) var isFullscreen: Bool = false
 
@@ -59,6 +63,7 @@ final class PlaybackController {
     @ObservationIgnored private var pendingURL: URL?
     @ObservationIgnored private var isRenderReady = false
     @ObservationIgnored private var fullscreenObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var abSeekPending = false
 
     init() {
         guard mpv.create() else { return }
@@ -118,6 +123,7 @@ final class PlaybackController {
         isLoaded = false
         currentTime = 0
         duration = 0
+        clearABLoop()
         mpv.loadFile(url.path(percentEncoded: false))
         mpv.setFlag("pause", false)
         isPaused = false
@@ -151,6 +157,15 @@ final class PlaybackController {
         mpv.setDouble("volume", clamped)
     }
 
+    /// 滚轮调音量。往上加大；从静音往上滚会取消静音。
+    func adjustVolume(by delta: Double) {
+        let next = min(max(volume + delta, 0), 100)
+        setVolume(next)
+        if isMuted && next > 0 {
+            setMuted(false)
+        }
+    }
+
     func setMuted(_ muted: Bool) {
         isMuted = muted
         mpv.setFlag("mute", muted)
@@ -161,6 +176,10 @@ final class PlaybackController {
     }
 
     static let speedSteps: [Double] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+    /// `Z`：0.75 → 0.5 → 0.25 → 1 → 0.75 …
+    static let slowSpeedCycle: [Double] = [0.75, 0.5, 0.25, 1]
+    /// `C`：1.25 → 1.5 → 2 → 1 → 1.25 …
+    static let fastSpeedCycle: [Double] = [1.25, 1.5, 2, 1]
 
     func setSpeed(_ value: Double) {
         let clamped = min(max(value, 0.25), 4)
@@ -168,13 +187,23 @@ final class PlaybackController {
         mpv.setDouble("speed", clamped)
     }
 
-    func nudgeSpeed(_ direction: Int) {
-        if direction > 0 {
-            if let next = Self.speedSteps.first(where: { $0 > speed + 0.01 }) {
-                setSpeed(next)
-            }
-        } else if let next = Self.speedSteps.last(where: { $0 < speed - 0.01 }) {
-            setSpeed(next)
+    func cycleSlowSpeed() {
+        cycleSpeed(through: Self.slowSpeedCycle, fallback: 0.75)
+    }
+
+    func cycleFastSpeed() {
+        cycleSpeed(through: Self.fastSpeedCycle, fallback: 1.25)
+    }
+
+    func resetSpeed() {
+        setSpeed(1)
+    }
+
+    private func cycleSpeed(through steps: [Double], fallback: Double) {
+        if let index = steps.firstIndex(where: { abs($0 - speed) < 0.01 }) {
+            setSpeed(steps[(index + 1) % steps.count])
+        } else {
+            setSpeed(fallback)
         }
     }
 
@@ -191,13 +220,74 @@ final class PlaybackController {
 
     func setLoopMode(_ mode: LoopMode) {
         loopMode = mode
-        mpv.setString("loop-file", mode == .single ? "inf" : "no")
+        applyLoopFileOption()
     }
 
     func cycleLoopMode() {
         let all = LoopMode.allCases
         let index = all.firstIndex(of: loopMode) ?? 0
         setLoopMode(all[(index + 1) % all.count])
+    }
+
+    /// 两端都齐且起点早于终点才循环。只齐一端不循环。
+    var isABLoopActive: Bool {
+        guard let a = loopA, let b = loopB else { return false }
+        return a < b
+    }
+
+    func markLoopA() {
+        guard let t = clampedLoopTime() else { return }
+        loopA = t
+        normalizeLoopPoints()
+        applyLoopFileOption()
+    }
+
+    func markLoopB() {
+        guard let t = clampedLoopTime() else { return }
+        loopB = t
+        normalizeLoopPoints()
+        applyLoopFileOption()
+    }
+
+    func clearLoopA() {
+        loopA = nil
+        abSeekPending = false
+        applyLoopFileOption()
+    }
+
+    func clearLoopB() {
+        loopB = nil
+        abSeekPending = false
+        applyLoopFileOption()
+    }
+
+    private func clearABLoop() {
+        loopA = nil
+        loopB = nil
+        abSeekPending = false
+        applyLoopFileOption()
+    }
+
+    /// 有 A-B 时由我们自己 seek 回 A，不要让 mpv 的单文件循环抢先绕回 0。
+    private func applyLoopFileOption() {
+        mpv.setString("loop-file", loopMode == .single && !isABLoopActive ? "inf" : "no")
+    }
+
+    private func clampedLoopTime() -> Double? {
+        guard isLoaded else { return nil }
+        var t = currentPlaybackTime() ?? currentTime
+        guard t.isFinite, t >= 0 else { return nil }
+        if duration > 0 {
+            t = min(t, duration)
+        }
+        return t
+    }
+
+    /// 终点早于起点则对调。
+    private func normalizeLoopPoints() {
+        guard let a = loopA, let b = loopB, b < a else { return }
+        loopA = b
+        loopB = a
     }
 
     func toggleFullscreen() {
@@ -209,7 +299,7 @@ final class PlaybackController {
         NSApp.keyWindow?.toggleFullScreen(nil)
     }
 
-    /// 给 C 键抽封面用：直接问 mpv 当前时间，绕开属性事件的推送延迟。
+    /// 给 B 键抽封面用：直接问 mpv 当前时间，绕开属性事件的推送延迟。
     func currentPlaybackTime() -> Double? {
         mpv.double("time-pos")
     }
@@ -228,7 +318,9 @@ final class PlaybackController {
         mpv.onPropertyChange = { [weak self] name, value in
             guard let self else { return }
             switch (name, value) {
-            case ("time-pos", .double(let v)): currentTime = v
+            case ("time-pos", .double(let v)):
+                currentTime = v
+                enforceABLoop(at: v)
             case ("duration", .double(let v)): duration = v
             case ("pause", .flag(let v)): isPaused = v
             case ("mute", .flag(let v)): isMuted = v
@@ -244,6 +336,12 @@ final class PlaybackController {
 
         mpv.onEndFile = { [weak self] in
             guard let self else { return }
+            if isABLoopActive, let a = loopA {
+                abSeekPending = true
+                seek(to: a)
+                play()
+                return
+            }
             if loopMode == .single {
                 seek(to: 0)
                 play()
@@ -251,6 +349,19 @@ final class PlaybackController {
             }
             onPlaybackEnded?()
         }
+    }
+
+    /// 有 A-B 时播到 B 就回到 A，不通知上层切下一条。
+    private func enforceABLoop(at time: Double) {
+        guard isABLoopActive, let a = loopA, let b = loopB else { return }
+        if isPaused { return }
+        if abSeekPending {
+            if time < b { abSeekPending = false }
+            return
+        }
+        guard time >= b else { return }
+        abSeekPending = true
+        seek(to: a)
     }
 
     private func observeFullscreen() {

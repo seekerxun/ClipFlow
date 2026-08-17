@@ -8,7 +8,7 @@ struct MediaBrowserView: View {
         @Bindable var env = env
         VStack(spacing: 0) {
             header
-            if env.folderURL != nil {
+            if env.folderURL != nil || !env.items.isEmpty {
                 HStack(spacing: 8) {
                     TextField("搜索文件名", text: $env.searchText)
                         .textFieldStyle(.roundedBorder)

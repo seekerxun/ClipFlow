@@ -14,7 +14,7 @@ struct IndexRecord: Codable, Sendable {
     var coverTime: Double?
     /// 所有候选位置都是近乎纯色，退回用第一个能解出来的帧。落库避免重复计算。
     var coverIsFallback: Bool = false
-    /// 用户按 C 键手动指定的封面位置，优先级高于一切启发式。
+    /// 用户按 B 键手动指定的封面位置，优先级高于一切启发式。
     var manualCoverTime: Double?
 
     // MARK: 第二阶段产物：精灵图

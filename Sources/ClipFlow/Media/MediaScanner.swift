@@ -14,6 +14,10 @@ enum MediaScanner {
         "rm", "rmvb", "vob", "divx", "f4v", "mxf", "y4m", "amv",
     ]
 
+    static func isVideoFile(_ url: URL) -> Bool {
+        videoExtensions.contains(url.pathExtension.lowercased())
+    }
+
     struct Options: Sendable {
         var recursive = true
         /// 递归深度上限。防止符号链接成环，也防止误选一个巨大的根目录时卡死。
@@ -82,6 +86,43 @@ enum MediaScanner {
         }
 
         // 自然序：否则 10.mp4 会排在 9.mp4 前面，一眼就能看出来不对
+        result.items.sort {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        return result
+    }
+
+    /// 用户拖入的单个或多个文件。扩展名判断与目录扫描同一套白名单。
+    /// 不复制、不移动、不删除原文件，只按路径建列表。
+    static func items(fromFiles urls: [URL]) -> Result {
+        let keys: [URLResourceKey] = [
+            .isRegularFileKey, .isDirectoryKey, .isPackageKey,
+            .fileSizeKey, .contentModificationDateKey,
+        ]
+        var result = Result()
+        var seen = Set<String>()
+        for url in urls {
+            guard let values = try? url.resourceValues(forKeys: Set(keys)) else {
+                result.skippedCount += 1
+                continue
+            }
+            if values.isDirectory == true || values.isPackage == true {
+                result.skippedCount += 1
+                continue
+            }
+            guard isVideoFile(url) else {
+                result.skippedCount += 1
+                continue
+            }
+            let path = url.path(percentEncoded: false)
+            if seen.contains(path) { continue }
+            seen.insert(path)
+            result.items.append(MediaItem(
+                url: url,
+                size: Int64(values.fileSize ?? 0),
+                modifiedAt: values.contentModificationDate ?? .distantPast
+            ))
+        }
         result.items.sort {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }

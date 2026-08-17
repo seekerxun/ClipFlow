@@ -37,8 +37,9 @@ struct MainView: View {
             ZStack {
                 PlayerView(controller: env.playback)
                 if env.items.isEmpty {
-                    Text("打开文件夹或把文件夹拖进来")
+                    Text("打开文件夹，或把文件夹 / 视频拖进来")
                         .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
                 }
             }
             .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
@@ -114,11 +115,24 @@ struct MainView: View {
     }
 
     private func handleDrop(_ urls: [URL]) -> Bool {
-        let folder = urls.first { url in
-            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        var folders: [URL] = []
+        var files: [URL] = []
+        for url in urls {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+            if values?.isDirectory == true, values?.isPackage != true {
+                folders.append(url)
+            } else {
+                files.append(url)
+            }
         }
-        guard let folder else { return false }
-        Task { await env.openFolder(folder) }
+        if let folder = folders.first {
+            Task { await env.openFolder(folder) }
+            return true
+        }
+        guard files.contains(where: { MediaScanner.isVideoFile($0) }) else {
+            return false
+        }
+        Task { await env.openFiles(files) }
         return true
     }
 }

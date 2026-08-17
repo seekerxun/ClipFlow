@@ -64,6 +64,9 @@ struct TransportBar: View {
                     hoverX = nil
                 }
             }
+            .overlay {
+                abLoopOverlay
+            }
             .overlay(alignment: .top) {
                 seekPreviewOverlay
             }
@@ -181,6 +184,40 @@ struct TransportBar: View {
             return min(max(scrubTime / controller.duration * sliderWidth, 0), sliderWidth)
         }
         return hoverX
+    }
+
+    @ViewBuilder
+    private var abLoopOverlay: some View {
+        GeometryReader { geo in
+            let dur = max(controller.duration, 0.01)
+            let w = geo.size.width
+            let midY = geo.size.height / 2
+            ZStack {
+                if let a = controller.loopA, let b = controller.loopB, a < b, controller.duration > 0 {
+                    let x0 = CGFloat(min(max(a / dur, 0), 1)) * w
+                    let x1 = CGFloat(min(max(b / dur, 0), 1)) * w
+                    Capsule()
+                        .fill(Color.accentColor.opacity(0.38))
+                        .frame(width: max(x1 - x0, 2), height: 4)
+                        .position(x: (x0 + x1) / 2, y: midY)
+                }
+                if let a = controller.loopA, controller.duration > 0 {
+                    abMarker
+                        .position(x: CGFloat(min(max(a / dur, 0), 1)) * w, y: midY)
+                }
+                if let b = controller.loopB, controller.duration > 0 {
+                    abMarker
+                        .position(x: CGFloat(min(max(b / dur, 0), 1)) * w, y: midY)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private var abMarker: some View {
+        Capsule()
+            .fill(Color.accentColor)
+            .frame(width: 3, height: 10)
     }
 
     @ViewBuilder

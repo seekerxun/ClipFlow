@@ -113,7 +113,7 @@ enum SpriteGenerator {
         )
     }
 
-    /// C 键：按指定时间抽一帧做封面。只重建这一张，不走启发式，不用 mpv screenshot。
+    /// B 键：按指定时间抽一帧做封面。只重建这一张，不走启发式，不用 mpv screenshot。
     static func generateCover(url: URL, at seconds: Double) async throws -> CoverOutput {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)

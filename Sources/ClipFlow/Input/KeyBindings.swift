@@ -49,6 +49,10 @@ enum KeyBindings {
             return true
         case 48: // tab：显示 / 隐藏素材浏览区，不交给系统切焦点
             return once(event) { env.isBrowserVisible.toggle() }
+        case 33: // [
+            return handleLoopBracket(event, env: env, isStart: true)
+        case 30: // ]
+            return handleLoopBracket(event, env: env, isStart: false)
         default:
             break
         }
@@ -81,14 +85,32 @@ enum KeyBindings {
             return once(event) { env.playback.cycleLoopMode() }
         case "m":
             return once(event) { env.playback.toggleMute() }
+        case "z":
+            return once(event) { env.playback.cycleSlowSpeed() }
+        case "x":
+            return once(event) { env.playback.resetSpeed() }
         case "c":
+            return once(event) { env.playback.cycleFastSpeed() }
+        case "b":
             return once(event) { env.captureCoverFromCurrentFrame() }
         case "[", "「":
-            return once(event) { env.playback.nudgeSpeed(-1) }
+            return handleLoopBracket(event, env: env, isStart: true)
         case "]", "」":
-            return once(event) { env.playback.nudgeSpeed(1) }
+            return handleLoopBracket(event, env: env, isStart: false)
         default:
             return false
+        }
+    }
+
+    @MainActor
+    private static func handleLoopBracket(_ event: NSEvent, env: AppEnvironment, isStart: Bool) -> Bool {
+        let shifted = event.modifierFlags.contains(.shift)
+        return once(event) {
+            if isStart {
+                if shifted { env.playback.clearLoopA() } else { env.playback.markLoopA() }
+            } else {
+                if shifted { env.playback.clearLoopB() } else { env.playback.markLoopB() }
+            }
         }
     }
 
@@ -183,6 +205,13 @@ final class ClipFlowKeyView: NSView {
             monitors.append(mouseMonitor)
         }
 
+        if let scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel, handler: { [weak self] event in
+            guard let self else { return event }
+            return self.handlePlayerVolumeScroll(event)
+        }) {
+            monitors.append(scrollMonitor)
+        }
+
         let center = NotificationCenter.default
         observers.append(center.addObserver(
             forName: NSMenu.didBeginTrackingNotification,
@@ -268,6 +297,37 @@ final class ClipFlowKeyView: NSView {
             }
             window.makeFirstResponder(self)
         }
+    }
+
+    /// 播放区滚轮调音量（上大下小）。列表 / 网格上的滚轮原样放过。
+    private func handlePlayerVolumeScroll(_ event: NSEvent) -> NSEvent? {
+        if isMenuTracking { return event }
+        if NSApp.modalWindow != nil { return event }
+        guard let window, window.isKeyWindow, window === self.window else { return event }
+        if event.window !== window { return event }
+        if window is NSPanel { return event }
+        guard let hit = window.contentView?.hitTest(event.locationInWindow) else { return event }
+        guard isPlayerVideo(hit) else { return event }
+        if abs(event.scrollingDeltaY) < abs(event.scrollingDeltaX) { return event }
+        let delta: Double
+        if event.hasPreciseScrollingDeltas {
+            delta = event.scrollingDeltaY * 0.2
+            if abs(delta) < 0.05 { return event }
+        } else {
+            guard event.scrollingDeltaY != 0 else { return event }
+            delta = event.scrollingDeltaY > 0 ? 5 : -5
+        }
+        env?.playback.adjustVolume(by: delta)
+        return nil
+    }
+
+    private func isPlayerVideo(_ view: NSView) -> Bool {
+        var current: NSView? = view
+        while let node = current {
+            if node is MPVGLBackend { return true }
+            current = node.superview
+        }
+        return false
     }
 
     private func shouldHandle(in window: NSWindow?) -> Bool {
