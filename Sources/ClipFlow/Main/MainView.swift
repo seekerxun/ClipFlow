@@ -20,7 +20,8 @@ struct MainView: View {
         }
         .background {
             ZStack {
-                Color(red: 0.10, green: 0.075, blue: 0.18)
+                Rectangle()
+                    .fill(.ultraThinMaterial)
                     .opacity(0.85)
                 RadialGradient(
                     colors: [
@@ -61,7 +62,8 @@ struct MainView: View {
                 }
             }
         }
-        .toolbarBackground(.hidden, for: .windowToolbar)
+        .toolbarBackground(Color.black.opacity(0.08), for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .onAppear {
             env.applyWindowChrome()
         }
