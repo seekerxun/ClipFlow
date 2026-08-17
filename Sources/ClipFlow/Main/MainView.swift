@@ -19,23 +19,8 @@ struct MainView: View {
             }
         }
         .background {
-            ZStack {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .opacity(0.85)
-                Color.black
-                    .opacity(0.70)
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.38, green: 0.24, blue: 0.96).opacity(0.07),
-                        .clear,
-                    ],
-                    center: .bottomTrailing,
-                    startRadius: 0,
-                    endRadius: 1_100
-                )
-            }
-            .ignoresSafeArea()
+            DockGlassBackground()
+                .ignoresSafeArea()
         }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls)
@@ -173,5 +158,22 @@ struct MainView: View {
         guard hasFolder || hasVideo else { return false }
         Task { await env.addURLs(urls) }
         return true
+    }
+}
+
+/// 使用与 Dock 接近的系统级窗口毛玻璃：模糊并吸收桌面颜色，不额外染黑或染色。
+private struct DockGlassBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .underWindowBackground
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = .underWindowBackground
+        nsView.blendingMode = .behindWindow
+        nsView.state = .active
     }
 }
