@@ -30,6 +30,8 @@ struct MediaGridView: View {
                     }
                     .padding(8)
                 }
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
                 .onAppear {
                     if let id = env.selectedID {
                         proxy.scrollTo(id, anchor: .center)

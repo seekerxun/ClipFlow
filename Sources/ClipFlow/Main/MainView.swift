@@ -23,23 +23,16 @@ struct MainView: View {
                 Rectangle()
                     .fill(.ultraThinMaterial)
                     .opacity(0.85)
+                Color.black
+                    .opacity(0.70)
                 RadialGradient(
                     colors: [
-                        Color(red: 0.38, green: 0.24, blue: 0.96).opacity(0.16),
+                        Color(red: 0.38, green: 0.24, blue: 0.96).opacity(0.07),
                         .clear,
                     ],
                     center: .bottomTrailing,
                     startRadius: 0,
-                    endRadius: 620
-                )
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.10, green: 0.58, blue: 0.98).opacity(0.08),
-                        .clear,
-                    ],
-                    center: .bottomLeading,
-                    startRadius: 0,
-                    endRadius: 720
+                    endRadius: 1_100
                 )
             }
             .ignoresSafeArea()
@@ -62,8 +55,7 @@ struct MainView: View {
                 }
             }
         }
-        .toolbarBackground(Color.black.opacity(0.08), for: .windowToolbar)
-        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear {
             env.applyWindowChrome()
         }

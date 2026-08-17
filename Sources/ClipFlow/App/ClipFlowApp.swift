@@ -87,7 +87,8 @@ private struct WindowTitleSync: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.styleMask.insert(.fullSizeContentView)
             window.isOpaque = false
-            window.backgroundColor = NSColor(calibratedWhite: 0.035, alpha: 0.85)
+            // 底色完全交给 MainView 的单层毛玻璃；窗口本身不再叠一层灰黑色。
+            window.backgroundColor = .clear
             window.titlebarSeparatorStyle = .none
         }
     }
