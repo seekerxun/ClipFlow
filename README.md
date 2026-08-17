@@ -40,7 +40,24 @@
 | 沙盒 | **不启用** | |
 
 ```bash
-brew install mpv ffmpeg
+brew install mpv ffmpeg xcodegen
+```
+
+### 构建
+
+工程文件由 [`project.yml`](project.yml) 生成，不入库。克隆后先生成一次：
+
+```bash
+xcodegen generate
+```
+
+之后正常用 Xcode 打开 `ClipFlow.xcodeproj` 即可。加减源文件不需要改工程，`Sources/ClipFlow` 下的文件会自动纳入；只有改构建设置时才需要动 `project.yml` 并重新生成。
+
+命令行构建与跑基准：
+
+```bash
+xcodebuild -project ClipFlow.xcodeproj -scheme ClipFlow -configuration Debug -derivedDataPath .build/dd build
+CLIPFLOW_BENCH="/path/to/videos" .build/dd/Build/Products/Debug/ClipFlow.app/Contents/MacOS/ClipFlow
 ```
 
 ### 为什么是 macOS 15
@@ -216,45 +233,73 @@ V0 实测 `screenshot` 命令必挂。**一律用 `mpv_command_async`**，别留
 
 ### 精灵图规格
 
-| 项 | 值 |
-|---|---|
-| 帧数 | 24 帧，在 [3%, 97%] 时长范围内均匀取样 |
-| 单帧宽度 | 160px（等比缩放） |
-| 排布 | 6 × 4 网格 |
-| 格式 | JPEG，质量 0.8 |
-| 单文件体积 | 约 40–60 KB |
-| 存放位置 | `~/Library/Caches/ClipFlow/sprites/<hash>.jpg` |
+| 项 | 精灵图 | 封面 |
+|---|---|---|
+| 帧数 | 24 帧，在 [3%, 97%] 时长范围内均匀取样 | 1 帧 |
+| 尺寸 | 单帧长边 144px（等比缩放），6 × 4 排布 | 320 × 320，居中正方形裁切 |
+| 质量 | JPEG 0.75 | JPEG 0.85 |
+| 实测体积 | 平均 132 KB | 平均 45 KB |
+| 存放位置 | `~/Library/Caches/ClipFlow/sprites/<摘要>.jpg` | `covers/<摘要>.jpg` |
 
-500 个视频约 20–30 MB，完全可接受。
+封面单独存一份而不是从精灵图裁：精灵图那份只有 144px，做正方形裁切会糊。
+
+1096 个真实视频实测共占 **189 MB**（封面 50 MB + 精灵图 143 MB），折合每个 177 KB。比预估偏大，主要是 24 帧各不相同时 JPEG 压不动。嫌大可以调低精灵图质量或单帧尺寸，属于可调项。
+
+索引本身放 `~/Library/Application Support/ClipFlow/index.json`——图片是缓存，系统清掉能自动重建；索引重建成本高，不该被系统回收。因此存在「有索引但图没了」的情况，读取方必须能接受并触发重建。
 
 ### 生成路径
 
-**主路径：`AVAssetImageGenerator`**（硬件加速，比走 mpv 快一个数量级）。关键参数一个都不能漏：
+**主路径：`AVAssetImageGenerator`**（硬件加速，比走 mpv 快一个数量级）：
 
 ```swift
-generator.maximumSize = CGSize(width: 160, height: 160)     // 解码时就降采样
-generator.requestedTimeToleranceBefore = .positiveInfinity  // 允许就近关键帧
-generator.requestedTimeToleranceAfter  = .positiveInfinity  // 不做精确帧解码
-generator.appliesPreferredTrackTransform = true             // 尊重旋转元数据
+generator.maximumSize = CGSize(width: 144, height: 144)   // 解码时就降采样
+generator.appliesPreferredTrackTransform = true           // 竖屏素材才不会横过来
+
+// 时间偏差必须限定在取样间隔的一半以内，不能设成无限
+let tolerance = CMTime(seconds: min(interval / 2, 0.5), preferredTimescale: 600)
+generator.requestedTimeToleranceBefore = tolerance
+generator.requestedTimeToleranceAfter  = tolerance
 ```
 
-不加 tolerance 的话每帧都要从关键帧解码到目标帧，慢十倍以上。用 `images(for:)` 一次提交全部 24 个时间点，比循环单帧请求便宜。
+#### ⚠️「无限偏差取最近关键帧」是个陷阱
+
+网上通行的抽帧提速做法是把 `requestedTimeTolerance` 设成 `.positiveInfinity`，让解码器就近取关键帧、不逐帧解。**这条建议在短视频素材上会造成严重后果**，1096 个真实文件的实测对比：
+
+| | 无限偏差 | 限定偏差 |
+|---|---|---|
+| 24 个取样点实际拿到的不同画面 | 中位 **3** 个 | **24** 个 |
+| 24 帧完全相同的视频 | **281 / 1096** | 0 |
+| 单个视频耗时 | 10ms | 99ms |
+| 封面兜底率 | **26%** | **0%** |
+
+原因是这类素材关键帧极稀疏，很多片子整条只有开头一个，于是 24 个取样请求全部被吸附到同一帧。后果是悬停扫过只有一两张不同画面、进度条预览失效、封面候选全落在 0 秒因而大量触发兜底——**精灵图的全部价值都没了**。
+
+代价是慢约十倍，但这个代价必须付。提速要靠下面的两阶段拆分，而不是牺牲时间分布。
+
+> **同理，ffmpeg 的 `-skip_frame nokey` 也不能无条件用。** Jellyfin 报告的约 110 倍加速是真的，但他们的内容是电影剧集：关键帧密集、时长以小时计。换成十几秒、只有一个关键帧的短片，出来的就是一堆重复帧。回退路径要按素材的关键帧密度决定用不用。
 
 **回退路径：ffmpeg**，用于 AVFoundation 打不开的格式（MKV / WebM / FLV / WMV / TS 等）。一个视频只起一个进程：
 
 ```bash
-ffmpeg -skip_frame nokey -i in.mkv -vf "scale=160:-1,tile=6x4" -frames:v 1 -fps_mode passthrough sprite.jpg
+ffmpeg -i in.mkv -vf "fps=<每秒帧数>,scale=144:-1,tile=6x4" -frames:v 1 sprite.jpg
 ```
 
-**`-skip_frame nokey` 是这里最重要的一个参数**：只解关键帧。Jellyfin 实测这一项带来约 **110 倍**加速（244 fps vs 2.2 fps），因为不需要解码整条视频。代价是帧的时间点不再均匀。
-
-这与 AVFoundation 路径上 `requestedTimeTolerance = .positiveInfinity` 是同一个思路——两条路径都放弃精确时间点、换取只碰关键帧。
-
-因为两条路径的帧间隔都不保证均匀，**索引中必须存下 24 帧各自的实际时间戳**，hover 位置到帧的映射才准确。这个字段本来做进度条预览也要用。
+因为帧间隔不保证正好等于请求值，**索引中必须存下 24 帧各自的实际时间戳**，悬停位置到帧的映射才准确。这个字段做进度条预览也要用。
 
 两条路径产出的精灵图格式完全一致，下游逻辑共用一套。
 
 **不要用 libmpv 生成缩略图。** 500 个文件的目录首次扫描会慢到难以接受。
+
+### 两阶段拆分
+
+封面和精灵图的成本差一个数量级：封面通常只解一帧，精灵图要解 24 帧。全挤在一起做的话，用户得等整个目录的精灵图都生成完才能看到第一屏。所以拆成两段：
+
+| 阶段 | 做什么 | 实测（1096 个真实文件） |
+|---|---|---|
+| **第一阶段** | 只出封面。按偏好顺序试候选位置，第一个不是近乎纯色的就用它，**多数视频只解一帧** | 折合 500 个 **11.9s** |
+| **第二阶段** | 完整 24 帧精灵图，后台补，不阻塞浏览 | 折合 500 个 **49.4s** |
+
+界面在第一阶段结束后就完全可用；悬停扫过等第二阶段补齐后自动生效。
 
 ### 封面帧选取
 
@@ -366,15 +411,23 @@ Cmd+O                    打开文件夹
 
 ## 9. 性能目标
 
-比"尽量即时响应"这种描述有用得多的是可验证的数字。基准：500 个文件的本地目录。
+比"尽量即时响应"这种描述有用得多的是可验证的数字。基准折算到 500 个文件。
 
-| 指标 | 目标 |
-|---|---|
-| 目录打开 → 首屏出图 | < 1s |
-| 500 个文件精灵图全量生成 | < 30s |
-| 切换视频 | < 150ms |
-| 列表滚动（2000 项） | 稳定 60fps |
-| 进度条 hover 预览响应 | < 16ms（读图，不解码） |
+用 `CLIPFLOW_BENCH=<目录> ClipFlow.app/Contents/MacOS/ClipFlow` 随时复测。
+
+| 指标 | 目标 | 实测 |
+|---|---|---|
+| 目录扫描（1096 个文件） | — | **0.053s** |
+| 目录打开 → 首屏出图 | < 1s | **0.54s** ✅ |
+| 500 个文件封面全量 | < 30s | **11.9s** ✅ |
+| 500 个文件精灵图全量（后台） | < 60s | **49.4s** ✅ |
+| 切换视频 | < 150ms | 待测（界面未搭） |
+| 列表滚动（2000 项） | 稳定 60fps | 待测 |
+| 进度条 hover 预览响应 | < 16ms（读图，不解码） | 待测 |
+
+实测环境：Apple Silicon 15 核，并发上限 4，素材为 1096 个 h264/hevc 的 mp4，中位时长 10.8 秒，约 40% 竖屏。**1096 个文件零失败。**
+
+> 原先只有「精灵图全量 < 30s」一条。拆成两阶段后这条不再有意义：真正决定「多久能开始浏览」的是封面阶段，精灵图在后台补，慢一点不影响使用。所以指标也跟着拆开了。
 
 ---
 
@@ -399,15 +452,15 @@ ClipFlow/
 │   └── MediaProbe.swift             # 时长 / 分辨率 / 编码探测（带超时）
 │
 ├── Thumbnail/
-│   ├── SpriteGenerator.swift        # AVFoundation 主路径
-│   ├── FFmpegSpriteGenerator.swift  # ffmpeg 回退路径（-skip_frame nokey）
-│   ├── CoverPicker.swift            # 封面帧选取（时间窗口 + 纯色剔除，约 40 行）
+│   ├── SpriteGenerator.swift        # 两阶段抽帧：generateCover / generate
+│   ├── FFmpegSpriteGenerator.swift  # ffmpeg 回退路径（尚未实现）
+│   ├── CoverPicker.swift            # 封面帧选取（候选窗口 + 纯色剔除）
 │   └── ThumbnailStore.swift         # 磁盘缓存读写
 │
 ├── Index/
-│   ├── MediaIndex.swift             # actor：索引读写
-│   ├── IndexRecord.swift            # 落盘结构（Codable）
-│   └── IndexStore.swift             # 原子写 / 版本迁移
+│   ├── MediaIndex.swift             # actor：索引读写 + 原子写
+│   ├── IndexRecord.swift            # 落盘结构（Codable，带版本号）
+│   └── IndexingPipeline.swift       # 两阶段流水线 + 并发上限
 │
 ├── Browser/
 │   ├── MediaBrowserView.swift       # 容器：列表 / 网格模式切换

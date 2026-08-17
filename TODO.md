@@ -59,43 +59,45 @@
 
 ### 1. 扫描与索引
 
-- [ ] `MediaScanner`：打开文件夹 / 拖入文件夹
-- [ ] 过滤 `.DS_Store`、隐藏文件、macOS 包（`.fcpbundle` / `.app`）、符号链接环
-- [ ] 排序使用 `localizedStandardCompare`（`10.mp4` 不能排在 `9.mp4` 前面）
-- [ ] `MediaProbe`：时长 / 分辨率探测，**带超时**（NAS 老素材会挂）
-- [ ] `MediaIndex` actor：缓存键 = 路径 + 大小 + mtime
-- [ ] `IndexStore`：Codable + 原子写，单文件
-- [ ] **失败状态落库**，同一 (路径, 大小, mtime) 不重试
+- [x] `MediaScanner`：目录扫描 + 扩展名白名单
+- [x] 过滤隐藏文件、macOS 包（`.fcpbundle` / `.app`）、符号链接；递归深度上限 8
+- [x] 排序使用 `localizedStandardCompare`（`10.mp4` 不能排在 `9.mp4` 前面）
+- [x] `MediaProbe`：时长 / 显示尺寸探测，**带超时**；套旋转矩阵（竖屏素材才不会横过来）
+- [x] `MediaIndex` actor：缓存键 = 路径 + 大小 + mtime（取整到秒）
+- [x] Codable + 原子写，单文件，带版本号；攒 50 条落一次盘
+- [x] **失败状态落库**，同一 (路径, 大小, mtime) 不重试
+- [ ] 打开文件夹 / 拖入文件夹的界面入口
 - [ ] 列表先用文件名立刻渲染，元数据异步填充
 
 ### 2. 精灵图流水线
 
-- [ ] `SpriteGenerator`：AVFoundation 主路径，24 帧 / 160px / 6×4
-- [ ] 四个关键参数一个不漏：`maximumSize`、`requestedTimeToleranceBefore/After = .positiveInfinity`、`appliesPreferredTrackTransform`
-- [ ] 用 `images(for:)` 一次提交 24 个时间点，不要循环单帧请求
-- [ ] `FFmpegSpriteGenerator`：ffmpeg 回退路径，一个视频一个进程
-- [ ] **`-skip_frame nokey`**（只解关键帧，Jellyfin 实测约 110 倍加速）
-- [ ] **索引中存下 24 帧各自的实际时间戳**（两条路径的帧间隔都不均匀，hover 映射要靠它）
-- [ ] 两条路径产出格式对齐，下游共用
-- [ ] `ThumbnailStore`：`~/Library/Caches/ClipFlow/sprites/<hash>.jpg`
+- [x] `SpriteGenerator`：AVFoundation 主路径，24 帧 / 长边 144px / 6×4
+- [x] `maximumSize` + `appliesPreferredTrackTransform`
+- [x] ~~`requestedTimeTolerance = .positiveInfinity`~~ → **实测有害，改为限定在取样间隔的一半以内**
+- [x] 用 `images(for:)` 一次提交 24 个时间点
+- [x] **索引中存下 24 帧各自的实际时间戳**
+- [x] `ThumbnailStore`：封面与精灵图分开存，图放缓存目录、索引放应用支持目录
+- [ ] `FFmpegSpriteGenerator`：ffmpeg 回退路径（这批素材 100% 走主路径，暂缓）
+- [ ] ~~`-skip_frame nokey`~~ → **同样有害**，只在关键帧密集的素材上才成立
 
-### 3. 封面帧选取（约 40 行，别再加码）
+### 3. 封面帧选取
 
-- [ ] 候选范围取 [35%, 80%]（24 帧中的第 9–19 帧）
-- [ ] 剔除近乎纯色的帧：平均亮度 < 16 或 > 240，或亮度标准差 < 12
-- [ ] 取第一个存活的帧
-- [ ] 全灭则放宽到 [20%, 95%] 重试；再全灭取中间帧并在索引中标记，不重复计算
-- [ ] 时长 < 4s 跳过时间偏置，直接对全部 24 帧做纯色剔除
-- [ ] **`C` 键手动覆盖封面**（精确 seek 抽帧 → 写索引 → 只重建这一张）
+- [x] 按偏好顺序试候选位置 [35%, 57.5%, 80%, 20%, 95%]，第一个不是近乎纯色的就用
+- [x] 剔除近乎纯色的帧：平均亮度 < 16 或 > 240，或亮度标准差 < 12
+- [x] 全灭则退回第一个能解出来的帧，并在索引中标记，不重复计算
+- [x] 时长 < 4s 换一组候选位置，不做时间偏置
+- [x] 懒抓：**多数视频只解一帧**，这是封面阶段能压到 11.9s/500 个的关键
+- [ ] **`C` 键手动覆盖封面**（等界面搭好）
 - [ ] 起始百分比做成偏好设置，默认 35%
 
-> 逃生口（`C` 键 + 可调百分比）比启发式本身更重要。ffmpegthumbnailer 选"最典型帧"、ffmpeg 选"最独特帧"，两个成熟实现方向相反——说明这个问题没有最优解，不值得继续投入。真要不够用，先调那个百分比。
+> 逃生口（`C` 键 + 可调百分比）比启发式本身更重要。实测这批 1096 个素材兜底率 0%，但那是因为它们没有片头 logo——真正要解决的场景没能在这批数据上得到验证。
 
 ### 4. 调度
 
+- [x] 并发上限 `min(4, activeProcessorCount / 2)`
+- [x] **两阶段拆分**：封面阶段先跑完，精灵图后台补
 - [ ] `ThumbnailQueue`：可见优先级调度
 - [ ] `onAppear` 入队（可见行 + 前后各一屏），`onDisappear` 降级 / 取消
-- [ ] 并发上限 `min(4, activeProcessorCount / 2)`
 - [ ] 空闲时低优先级补齐剩余项
 
 ### 5. 播放
@@ -197,3 +199,9 @@
 | 切换速度方案 | V1 单实例 `loadfile`，实测超标才上预载 |
 | `Cmd+W` / `Cmd+S` | 不使用，改为 `Q` / `E` |
 | 索引存储 | Codable + 原子写单文件，不上 Core Data |
+| 正式工程形式 | XcodeGen 从 `project.yml` 生成，工程文件不入库手改 |
+| 抽帧时间偏差 | **必须限定在取样间隔的一半以内**。设成无限会让 24 个取样点塌缩到同一帧（实测中位只剩 3 个不同画面），精灵图彻底失效 |
+| ffmpeg `-skip_frame nokey` | 同上，**不能无条件用**。只在关键帧密集的长视频上成立 |
+| 流水线阶段 | 拆两段：封面先出（界面立刻可用），精灵图后台补 |
+| 缩略图格子 | 统一方形，画面居中裁切填满 |
+| 封面存储 | 单独存一份 320×320，不从精灵图裁（那份只有 144px，裁完会糊） |

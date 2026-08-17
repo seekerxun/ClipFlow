@@ -1,0 +1,64 @@
+# XcodeGen 工程描述。改完这个文件后跑 `xcodegen generate` 重新生成 ClipFlow.xcodeproj。
+#
+# 之所以不手写 .xcodeproj：那是机器生成的格式，手改容易出错，
+# 而且每加一个文件都要在 Xcode 里操作。这份 YAML 是唯一事实来源。
+
+name: ClipFlow
+
+options:
+  bundleIdPrefix: com.seekerxun
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    # 先用 Swift 5 语言模式。Swift 6 的严格并发检查对 AVFoundation 这类
+    # 尚未完全标注的老框架很不友好，开局就会陷进大量协议标注里。
+    # 等管线跑通、边界稳定后再切到 6.0。
+    SWIFT_VERSION: "5.0"
+    SWIFT_STRICT_CONCURRENCY: targeted
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    # OpenGL 自 10.14 起废弃，但 libmpv 的渲染接口在 macOS 上只有它可用
+    GCC_PREPROCESSOR_DEFINITIONS: GL_SILENCE_DEPRECATION=1
+    OTHER_SWIFT_FLAGS: -D GL_SILENCE_DEPRECATION
+
+targets:
+  ClipFlow:
+    type: application
+    platform: macOS
+
+    sources:
+      - path: Sources/ClipFlow
+        excludes:
+          - "**/.DS_Store"
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.seekerxun.ClipFlow
+        PRODUCT_NAME: ClipFlow
+        INFOPLIST_FILE: Sources/ClipFlow/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/ClipFlow/Resources/ClipFlow-Bridging-Header.h
+
+        # 不启用沙盒：不上架 Store，省掉一整套目录授权书签的状态管理
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_IDENTITY: "-"
+
+        # 同时列出 Apple Silicon 与 Intel 的 Homebrew 前缀。
+        # Xcode 会忽略不存在的路径，因此两台机器都能直接构建。
+        HEADER_SEARCH_PATHS:
+          - /opt/homebrew/include
+          - /usr/local/include
+        LIBRARY_SEARCH_PATHS:
+          - /opt/homebrew/lib
+          - /usr/local/lib
+        OTHER_LDFLAGS:
+          - -lmpv
+
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: OpenGL.framework
+      - sdk: CoreVideo.framework

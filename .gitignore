@@ -37,3 +37,7 @@ Spike/sample.mkv
 
 # 图标生成物（用 Tools/make-icon.swift 从 icon.png 重新生成）
 Tools/out/
+
+# XcodeGen 生成的工程文件。project.yml 才是唯一事实来源，
+# 克隆后跑 `xcodegen generate` 生成即可。
+ClipFlow.xcodeproj/
