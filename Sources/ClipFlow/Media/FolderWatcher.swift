@@ -1,7 +1,7 @@
 import CoreServices
 import Foundation
 
-/// 盯着已打开的根目录（含子目录）。变化先合并再通知，避免每个事件都去扫一遍。
+/// 盯着列表里涉及到的文件夹根（可多个，含子目录）。变化先合并再通知，避免每个事件都去扫一遍。
 final class FolderWatcher {
     private var stream: FSEventStreamRef?
     private var debounceWork: DispatchWorkItem?
@@ -14,9 +14,11 @@ final class FolderWatcher {
 
     var onDebouncedChange: (() -> Void)?
 
-    func start(path: String) {
+    func start(paths: [String]) {
         stop()
-        let paths = [path] as CFArray
+        let unique = paths.filter { !$0.isEmpty }
+        guard !unique.isEmpty else { return }
+        let paths = unique as CFArray
         var context = FSEventStreamContext(
             version: 0,
             info: Unmanaged.passUnretained(self).toOpaque(),

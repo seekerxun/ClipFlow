@@ -92,6 +92,40 @@ enum MediaScanner {
         return result
     }
 
+    /// 拖入或打开的混合来源：多个文件夹、多个视频、或二者一起。
+    /// 每个文件夹都扫；能作为视频的加入结果；非视频文件安静跳过。同一路径只保留一次。
+    static func collect(from urls: [URL], options: Options = .init()) -> Result {
+        var result = Result()
+        var seen = Set<String>()
+
+        func append(_ item: MediaItem) {
+            let path = item.key.path
+            if seen.contains(path) { return }
+            seen.insert(path)
+            result.items.append(item)
+        }
+
+        for url in urls {
+            let fileURL = URL(fileURLWithPath: url.path(percentEncoded: false))
+            let keys: Set<URLResourceKey> = [.isDirectoryKey, .isPackageKey]
+            guard let values = try? fileURL.resourceValues(forKeys: keys) else { continue }
+            if values.isDirectory == true, values.isPackage != true {
+                let scanned = scan(root: fileURL, options: options)
+                result.skippedCount += scanned.skippedCount
+                for item in scanned.items { append(item) }
+                continue
+            }
+            let fileResult = items(fromFiles: [fileURL])
+            result.skippedCount += fileResult.skippedCount
+            for item in fileResult.items { append(item) }
+        }
+
+        result.items.sort {
+            $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+        return result
+    }
+
     /// 用户拖入的单个或多个文件。扩展名判断与目录扫描同一套白名单。
     /// 不复制、不移动、不删除原文件，只按路径建列表。
     static func items(fromFiles urls: [URL]) -> Result {

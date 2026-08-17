@@ -26,6 +26,8 @@ enum BrowserSort: String, CaseIterable, Identifiable {
 final class AppEnvironment {
     private enum Pref {
         static let lastFolder = "lastFolderPath"
+        static let lastFolders = "lastFolderPaths"
+        static let lastFiles = "lastFilePaths"
         static let sidebarWidth = "sidebarWidth"
         static let browserOnRight = "browserOnRight"
         static let showsGrid = "showsGrid"
@@ -40,7 +42,6 @@ final class AppEnvironment {
     var items: [MediaItem] = []
     var selectedID: String?
     var records: [String: IndexRecord] = [:]
-    var folderURL: URL?
     var skippedCount = 0
     var isBrowserVisible = true
     var browserOnRight = false {
@@ -70,6 +71,9 @@ final class AppEnvironment {
     @ObservationIgnored private let folderWatcher = FolderWatcher()
     @ObservationIgnored private var folderGeneration = 0
     @ObservationIgnored private var didAttemptRestore = false
+    @ObservationIgnored private var folderRoots: [URL] = []
+    @ObservationIgnored private var looseFiles: [URL] = []
+    @ObservationIgnored private var sourceTask: Task<Void, Never>?
 
     var selectedItem: MediaItem? {
         items.first { $0.id == selectedID }
@@ -120,98 +124,46 @@ final class AppEnvironment {
         }
         Task {
             await index.load()
-            await self.restoreLastFolderIfNeeded()
+            await self.restoreLastSourcesIfNeeded()
         }
     }
 
-    // MARK: - 目录
+    // MARK: - 加入列表
 
     func promptOpenFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.prompt = "打开"
-        panel.message = "选择要浏览的视频文件夹"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await openFolder(url) }
+        panel.message = "选择要加入列表的视频文件夹"
+        guard panel.runModal() == .OK else { return }
+        let urls = panel.urls
+        guard !urls.isEmpty else { return }
+        Task { await addURLs(urls) }
     }
 
-    func openFolder(_ url: URL) async {
+    /// 把拖入或打开的来源加入当前列表。不清空已有条目；同一路径不加第二次。
+    func addURLs(_ urls: [URL]) async {
+        let previous = sourceTask
+        let task = Task { @MainActor in
+            await previous?.value
+            await self.performAdd(urls)
+        }
+        sourceTask = task
+        await task.value
+    }
+
+    private func performAdd(_ urls: [URL]) async {
         folderGeneration += 1
         let gen = folderGeneration
-        folderWatcher.stop()
-
-        let path = url.path(percentEncoded: false)
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
-            guard gen == folderGeneration else { return }
-            clearFolderQuietly(forgetSavedPath: false)
-            return
-        }
-
-        folderURL = url
-        applyWindowChrome()
-        UserDefaults.standard.set(path, forKey: Pref.lastFolder)
-
-        thumbnails.reset(items: [])
-        playback.pause()
-        selectedID = nil
-        records = [:]
-
-        let scanned = url
         let result = await Task.detached {
-            MediaScanner.scan(root: scanned)
+            MediaScanner.collect(from: urls)
         }.value
-        await applyOpenedScan(result, gen: gen, watchPath: path)
-    }
-
-    /// 拖入的视频文件：只按路径建列表并播放，不复制、不移动、不删除原文件。
-    func openFiles(_ urls: [URL]) async {
-        folderGeneration += 1
-        let gen = folderGeneration
-        folderWatcher.stop()
-
-        folderURL = nil
-        applyWindowChrome()
-
-        thumbnails.reset(items: [])
-        playback.pause()
-        selectedID = nil
-        records = [:]
-        searchText = ""
-
-        let files = urls.map { URL(fileURLWithPath: $0.path(percentEncoded: false)) }
-        let result = await Task.detached {
-            MediaScanner.items(fromFiles: files)
-        }.value
-        await applyOpenedScan(result, gen: gen, watchPath: nil)
-    }
-
-    private func applyOpenedScan(_ result: MediaScanner.Result, gen: Int, watchPath: String?) async {
-        guard gen == folderGeneration else { return }
-
-        items = result.items
-        skippedCount = result.skippedCount
-
-        await index.load()
-        var recs: [String: IndexRecord] = [:]
-        for item in items {
-            if let record = await index.record(for: item.key) {
-                recs[item.id] = record
-            }
-        }
-        records = recs
-        thumbnails.reset(items: sortedItems, records: recs)
-
-        if let first = displayedItems.first {
-            select(first)
-        }
-
-        if let watchPath {
-            folderWatcher.start(path: watchPath)
-        }
-
+        recordSources(from: urls)
+        persistSources()
+        await appendItems(result.items)
+        startWatchingCurrentRoots()
         Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard gen == folderGeneration else { return }
@@ -219,56 +171,106 @@ final class AppEnvironment {
         }
     }
 
-    func restoreLastFolderIfNeeded() async {
+    private func restoreLastSourcesIfNeeded() async {
         guard !didAttemptRestore else { return }
         didAttemptRestore = true
-        guard folderURL == nil else { return }
-        guard let path = UserDefaults.standard.string(forKey: Pref.lastFolder), !path.isEmpty else {
-            return
+        guard items.isEmpty else { return }
+        var folders = UserDefaults.standard.stringArray(forKey: Pref.lastFolders) ?? []
+        var files = UserDefaults.standard.stringArray(forKey: Pref.lastFiles) ?? []
+        if folders.isEmpty, files.isEmpty,
+           let old = UserDefaults.standard.string(forKey: Pref.lastFolder), !old.isEmpty {
+            folders = [old]
         }
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
-            return
-        }
-        await openFolder(URL(fileURLWithPath: path, isDirectory: true))
+        let urls = folders.map { URL(fileURLWithPath: $0) }
+            + files.map { URL(fileURLWithPath: $0) }
+        guard !urls.isEmpty else { return }
+        await addURLs(urls)
     }
 
     func applyWindowChrome() {
         guard let window = NSApp.keyWindow else { return }
-        if let url = folderURL {
-            window.representedURL = url
-            window.title = url.lastPathComponent
-        } else {
-            window.representedURL = nil
-            window.title = "ClipFlow"
+        window.representedURL = nil
+        window.title = "ClipFlow"
+    }
+
+    private func recordSources(from urls: [URL]) {
+        let fm = FileManager.default
+        for url in urls {
+            let path = url.path(percentEncoded: false)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: path, isDirectory: &isDir) else { continue }
+            if isDir.boolValue {
+                let values = try? URL(fileURLWithPath: path).resourceValues(forKeys: [.isPackageKey])
+                if values?.isPackage == true { continue }
+                if folderRoots.contains(where: { $0.path(percentEncoded: false) == path }) { continue }
+                folderRoots.append(URL(fileURLWithPath: path, isDirectory: true))
+            } else if MediaScanner.isVideoFile(url) {
+                if looseFiles.contains(where: { $0.path(percentEncoded: false) == path }) { continue }
+                looseFiles.append(URL(fileURLWithPath: path))
+            }
+        }
+    }
+
+    private func persistSources() {
+        UserDefaults.standard.set(
+            folderRoots.map { $0.path(percentEncoded: false) },
+            forKey: Pref.lastFolders
+        )
+        UserDefaults.standard.set(
+            looseFiles.map { $0.path(percentEncoded: false) },
+            forKey: Pref.lastFiles
+        )
+        UserDefaults.standard.removeObject(forKey: Pref.lastFolder)
+    }
+
+    private func startWatchingCurrentRoots() {
+        folderWatcher.start(paths: folderRoots.map { $0.path(percentEncoded: false) })
+    }
+
+    private func appendItems(_ newItems: [MediaItem]) async {
+        let existingPaths = Set(items.map(\.key.path))
+        let added = newItems.filter { !existingPaths.contains($0.key.path) }
+        guard !added.isEmpty else { return }
+
+        var recs = records
+        for item in added {
+            if let record = await index.record(for: item.key) {
+                recs[item.id] = record
+            }
+        }
+
+        let wasEmpty = items.isEmpty
+        items.append(contentsOf: added)
+        records = recs
+        thumbnails.sync(items: sortedItems, records: recs)
+
+        if wasEmpty, let first = displayedItems.first {
+            select(first)
         }
     }
 
     // MARK: - 目录变化
 
     private func handleFolderChange() {
-        Task { await refreshOpenFolder() }
+        let previous = sourceTask
+        sourceTask = Task { @MainActor in
+            await previous?.value
+            await self.refreshSources()
+        }
     }
 
-    private func refreshOpenFolder() async {
-        guard let url = folderURL else { return }
-        let gen = folderGeneration
-        let path = url.path(percentEncoded: false)
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
-            guard gen == folderGeneration else { return }
-            clearFolderQuietly(forgetSavedPath: false)
-            return
-        }
-
-        let scanned = url
+    private func refreshSources() async {
+        let roots = folderRoots
+        let files = looseFiles
         let result = await Task.detached {
-            MediaScanner.scan(root: scanned)
+            MediaScanner.collect(from: roots + files)
         }.value
-        guard gen == folderGeneration,
-              folderURL?.path(percentEncoded: false) == url.path(percentEncoded: false)
-        else { return }
+
+        folderRoots = roots.filter { Self.isExistingDirectory($0) }
+        looseFiles = files.filter { Self.isExistingFile($0) }
+        persistSources()
         await applyIncrementalScan(result)
+        startWatchingCurrentRoots()
     }
 
     private func applyIncrementalScan(_ result: MediaScanner.Result) async {
@@ -308,20 +310,18 @@ final class AppEnvironment {
         }
     }
 
-    private func clearFolderQuietly(forgetSavedPath: Bool) {
-        folderWatcher.stop()
-        folderURL = nil
-        items = []
-        records = [:]
-        selectedID = nil
-        skippedCount = 0
-        searchText = ""
-        thumbnails.reset(items: [])
-        playback.pause()
-        if forgetSavedPath {
-            UserDefaults.standard.removeObject(forKey: Pref.lastFolder)
-        }
-        applyWindowChrome()
+    private static func isExistingDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(
+            atPath: url.path(percentEncoded: false), isDirectory: &isDir
+        ) && isDir.boolValue
+    }
+
+    private static func isExistingFile(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(
+            atPath: url.path(percentEncoded: false), isDirectory: &isDir
+        ) && !isDir.boolValue
     }
 
     // MARK: - 排序

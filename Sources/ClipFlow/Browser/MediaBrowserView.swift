@@ -8,41 +8,39 @@ struct MediaBrowserView: View {
         @Bindable var env = env
         VStack(spacing: 0) {
             header
-            if env.folderURL != nil || !env.items.isEmpty {
-                HStack(spacing: 8) {
-                    TextField("搜索文件名", text: $env.searchText)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.small)
-                    Picker("排序", selection: $env.sort) {
-                        ForEach(BrowserSort.allCases) { item in
-                            Text(item.title).tag(item)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .fixedSize()
+            HStack(spacing: 8) {
+                TextField("搜索文件名", text: $env.searchText)
+                    .textFieldStyle(.roundedBorder)
                     .controlSize(.small)
-                    .help("排序")
-                    .accessibilityLabel("排序")
-                    Button {
-                        env.sortAscending.toggle()
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: env.sortAscending ? "arrow.up" : "arrow.down")
-                            Text(env.sortAscending ? "正序" : "反序")
-                        }
+                Picker("排序", selection: $env.sort) {
+                    ForEach(BrowserSort.allCases) { item in
+                        Text(item.title).tag(item)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .fixedSize()
-                    .focusable(false)
-                    .help("切换正序 / 反序")
-                    .accessibilityLabel(env.sortAscending ? "正序" : "反序")
-                    .accessibilityHint("切换排序方向")
                 }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+                .controlSize(.small)
+                .help("排序")
+                .accessibilityLabel("排序")
+                Button {
+                    env.sortAscending.toggle()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: env.sortAscending ? "arrow.up" : "arrow.down")
+                        Text(env.sortAscending ? "正序" : "反序")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .fixedSize()
+                .focusable(false)
+                .help("切换正序 / 反序")
+                .accessibilityLabel(env.sortAscending ? "正序" : "反序")
+                .accessibilityHint("切换排序方向")
             }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
             Divider()
             if env.showsGrid {
                 MediaGridView()
@@ -55,12 +53,9 @@ struct MediaBrowserView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text(env.folderURL?.lastPathComponent ?? "素材")
-                .font(.headline)
-                .lineLimit(1)
+            countLabel
             Spacer(minLength: 0)
             layoutPicker
-            countLabel
             Button {
                 env.browserOnRight.toggle()
             } label: {
