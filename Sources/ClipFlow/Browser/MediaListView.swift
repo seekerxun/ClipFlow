@@ -17,9 +17,15 @@ struct MediaListView: View {
                         .id(item.id)
                         .contentShape(Rectangle())
                         .onTapGesture { env.select(item) }
+                        .onDrag { item.fileDragProvider }
                         .onAppear { env.thumbnails.appear(id: item.id) }
                         .onDisappear { env.thumbnails.disappear(id: item.id) }
                     }
+                }
+            }
+            .onAppear {
+                if let id = env.selectedID {
+                    proxy.scrollTo(id, anchor: .center)
                 }
             }
             .onChange(of: env.selectedID) { _, newID in

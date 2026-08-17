@@ -1,39 +1,60 @@
 import AppKit
 import SwiftUI
 
-/// 列表行：方形缩略图居中裁切 + 文件名。悬停扫过读已生成的精灵图，零解码。
+/// 列表行 / 网格格：方形缩略图居中裁切。悬停扫过读已生成的精灵图，零解码。
 struct MediaItemView: View {
+    enum Layout {
+        case list
+        case grid
+    }
+
     let item: MediaItem
     let record: IndexRecord?
     let isSelected: Bool
+    var layout: Layout = .list
 
     @State private var hoverFraction: CGFloat?
     @State private var coverImage: NSImage?
     @State private var spriteImage: NSImage?
 
     var body: some View {
-        HStack(spacing: 8) {
-            thumbnail
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+        content
+            .task(id: coverTaskID) {
+                loadImages()
             }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
-        .task(id: coverTaskID) {
-            loadImages()
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch layout {
+        case .list:
+            HStack(spacing: 8) {
+                thumbnail
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
+        case .grid:
+            thumbnail
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                }
         }
     }
 
@@ -163,5 +184,12 @@ enum DisplayFormat {
             return String(format: "%d:%02d:%02d", t / 3600, (t % 3600) / 60, t % 60)
         }
         return String(format: "%d:%02d", t / 60, t % 60)
+    }
+}
+
+extension MediaItem {
+    /// 拖到 Finder / 剪辑软件：只提供文件 URL，不读文件内容。
+    var fileDragProvider: NSItemProvider {
+        NSItemProvider(object: url as NSURL)
     }
 }

@@ -3,7 +3,7 @@ import Observation
 
 /// 可见优先级调度。打开目录时不要把全部文件一次性丢进 `IndexingPipeline.process`。
 ///
-/// 只为当前可见行 + 前后各一屏排队；`onAppear` 入队，`onDisappear` 降级或取消。
+/// 只为当前可见行 / 格 + 前后各一屏排队；`onAppear` 入队，`onDisappear` 降级或取消。
 /// 空闲后再以最低优先级慢慢补齐剩余项。并发上限沿用流水线的
 /// `min(4, activeProcessorCount / 2)`，不会另开几百个 Task。
 @MainActor

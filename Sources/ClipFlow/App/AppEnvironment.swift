@@ -19,6 +19,8 @@ final class AppEnvironment {
     var browserOnRight = false
     var sidebarWidth: Double = 320
     var shouldScrollToSelection = false
+    /// 本次运行内记住；跨启动持久化是 V2。
+    var showsGrid = false
 
     var selectedItem: MediaItem? {
         items.first { $0.id == selectedID }
