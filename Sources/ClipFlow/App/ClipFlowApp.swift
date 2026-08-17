@@ -40,6 +40,7 @@ private struct WindowRoot: View {
     var body: some View {
         MainView()
             .environment(environment)
+            .preferredColorScheme(.dark)
             .focusedSceneValue(\.clipFlowEnvironment, environment)
             .background {
                 WindowTitleSync(
@@ -82,6 +83,10 @@ private struct WindowTitleSync: NSViewRepresentable {
             guard let window = nsView.window else { return }
             window.title = title
             window.representedURL = fileURL
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.titlebarAppearsTransparent = true
+            window.backgroundColor = NSColor(calibratedWhite: 0.035, alpha: 1)
+            window.titlebarSeparatorStyle = .line
         }
     }
 }
@@ -117,6 +122,12 @@ private struct ClipFlowCommands: Commands {
                 env?.browserOnRight = true
                 env?.isBrowserVisible = true
             }
+            .disabled(env == nil)
+            Divider()
+            Button("搜索素材") {
+                env?.showSearch()
+            }
+            .keyboardShortcut("f", modifiers: .command)
             .disabled(env == nil)
         }
     }

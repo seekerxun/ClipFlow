@@ -18,6 +18,7 @@ struct MainView: View {
                 browserPane
             }
         }
+        .background(Color(nsColor: NSColor(calibratedWhite: 0.035, alpha: 1)))
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls)
         }
@@ -33,23 +34,54 @@ struct MainView: View {
     }
 
     private var playerPane: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                PlayerView(controller: env.playback)
-                if env.items.isEmpty {
-                    Text("打开或拖入文件夹、视频，即可加入列表")
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
-                }
+        ZStack {
+            PlayerView(controller: env.playback)
+            if env.items.isEmpty {
+                emptyState
             }
-            .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-            TransportBar(controller: env.playback)
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .overlay(alignment: .bottom) {
+            TransportBar(controller: env.playback)
+                .padding(16)
+        }
+        .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .top) {
             if !env.isBrowserVisible {
                 showBrowserBar
             }
         }
+        .clipped()
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "film.stack")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(.secondary)
+            VStack(spacing: 4) {
+                Text("打开视频开始浏览")
+                    .font(.headline)
+                Text("拖入文件夹或按 ⌘O 添加素材")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Button {
+                env.promptOpenFolder()
+            } label: {
+                Label("打开文件夹", systemImage: "folder.badge.plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 22)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.24), radius: 24, y: 10)
+        .padding(.bottom, 48)
     }
 
     /// 浏览区收起后仍留在播放区顶部，和标题上的收起箭头成对。
@@ -73,14 +105,19 @@ struct MainView: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.bar)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+        }
+        .padding(12)
     }
 
     private var splitter: some View {
         Rectangle()
-            .fill(Color(nsColor: .separatorColor))
-            .frame(width: 1)
+            .fill(Color.white.opacity(0.08))
+            .frame(width: 0.5)
             .overlay {
                 Rectangle()
                     .fill(.clear)

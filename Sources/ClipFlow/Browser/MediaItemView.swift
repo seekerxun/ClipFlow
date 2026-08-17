@@ -16,6 +16,7 @@ struct MediaItemView: View {
     @State private var hoverFraction: CGFloat?
     @State private var coverImage: NSImage?
     @State private var spriteImage: NSImage?
+    @State private var isHovering = false
 
     var body: some View {
         content
@@ -28,33 +29,51 @@ struct MediaItemView: View {
     private var content: some View {
         switch layout {
         case .list:
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 thumbnail
-                    .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
+                    .frame(width: 96, height: 58)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
                     Text(item.name)
+                        .font(.callout)
+                        .fontWeight(isSelected ? .semibold : .regular)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if let subtitle {
                         Text(subtitle)
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
+            .padding(8)
+            .background {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color.accentColor.opacity(0.18)
+                            : Color.white.opacity(isHovering ? 0.055 : 0)
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? Color.accentColor.opacity(0.78) : Color.clear,
+                        lineWidth: 1
+                    )
+            }
+            .onHover { isHovering = $0 }
         case .grid:
             thumbnail
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                 }
+                .scaleEffect(isHovering ? 1.015 : 1)
+                .onHover { isHovering = $0 }
         }
     }
 
@@ -81,8 +100,11 @@ struct MediaItemView: View {
     private var thumbnail: some View {
         GeometryReader { geo in
             ZStack {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(.quaternary)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.white.opacity(0.055))
+                Image(systemName: "film")
+                    .font(.system(size: 16, weight: .light))
+                    .foregroundStyle(.tertiary)
                 if let hoverFraction, let spriteImage,
                    let tile = spriteTile(spriteImage, fraction: hoverFraction)
                 {
@@ -99,6 +121,18 @@ struct MediaItemView: View {
                         .clipped()
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if let duration = record?.duration {
+                    Text(DisplayFormat.duration(duration))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 4))
+                        .padding(5)
+                }
+            }
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
@@ -109,6 +143,7 @@ struct MediaItemView: View {
                 }
             }
         }
+        .animation(.easeOut(duration: 0.12), value: isHovering)
     }
 
     private func loadImages() {

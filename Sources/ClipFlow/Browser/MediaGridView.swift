@@ -11,7 +11,7 @@ struct MediaGridView: View {
         GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVGrid(columns: columns(for: geo.size), spacing: 3) {
+                    LazyVGrid(columns: columns(for: geo.size), spacing: 8) {
                         ForEach(env.displayedItems) { item in
                             MediaItemView(
                                 item: item,
@@ -28,7 +28,7 @@ struct MediaGridView: View {
                             .onDisappear { env.thumbnails.disappear(id: item.id) }
                         }
                     }
-                    .padding(6)
+                    .padding(8)
                 }
                 .onAppear {
                     if let id = env.selectedID {
@@ -46,8 +46,8 @@ struct MediaGridView: View {
 
     /// 按浏览区尺寸估列数，让一屏格子落在大约 40–60。
     private func columns(for size: CGSize) -> [GridItem] {
-        let spacing: CGFloat = 3
-        let padding: CGFloat = 12
+        let spacing: CGFloat = 8
+        let padding: CGFloat = 16
         let innerW = max(size.width - padding, 1)
         let innerH = size.height > 1 ? max(size.height - padding, 1) : 600
         let estimated = sqrt(50.0 * innerW / innerH)

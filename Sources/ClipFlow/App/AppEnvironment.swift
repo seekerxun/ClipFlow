@@ -52,6 +52,8 @@ final class AppEnvironment {
         didSet { UserDefaults.standard.set(showsGrid, forKey: Pref.showsGrid) }
     }
     var searchText = ""
+    var isSearchVisible = false
+    var searchFocusRequest = 0
     var sort: BrowserSort = .name {
         didSet {
             UserDefaults.standard.set(sort.rawValue, forKey: Pref.sort)
@@ -170,6 +172,18 @@ final class AppEnvironment {
 
     func applyWindowChrome() {
         // 窗口标题由各窗口按当前播放文件更新，这里不再写死 ClipFlow。
+    }
+
+    /// 搜索默认不占界面；Cmd+F 或搜索按钮进入后，由视图响应请求并取得焦点。
+    func showSearch() {
+        isBrowserVisible = true
+        isSearchVisible = true
+        searchFocusRequest &+= 1
+    }
+
+    func hideSearch() {
+        searchText = ""
+        isSearchVisible = false
     }
 
     private func recordSources(from urls: [URL]) {

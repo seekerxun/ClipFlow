@@ -15,142 +15,172 @@ struct TransportBar: View {
     @State private var coverImage: NSImage?
 
     var body: some View {
-        VStack(spacing: 4) {
+        HStack(spacing: 10) {
+            Button {
+                controller.togglePlayPause()
+            } label: {
+                Image(systemName: playPauseSymbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 34, height: 32)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .disabled(!controller.isLoaded)
+            .focusable(false)
+            .help(playPauseHelp)
+
+            Text("\(DisplayFormat.duration(displayTime)) / \(DisplayFormat.duration(controller.duration))")
+                .font(.system(.caption, design: .monospaced, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(.primary.opacity(0.82))
+                .frame(minWidth: 92, alignment: .leading)
+
+            timelineSlider
+                .frame(minWidth: 120, maxWidth: .infinity)
+
+            Button {
+                controller.toggleMute()
+            } label: {
+                Image(systemName: muteSymbol)
+                    .frame(width: 22, height: 30)
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .help(controller.isMuted ? "取消静音" : "静音")
+
             Slider(
                 value: Binding(
-                    get: { isScrubbing ? scrubTime : controller.currentTime },
-                    set: { newValue in
-                        scrubTime = newValue
-                        controller.seek(to: newValue)
+                    get: { controller.volume },
+                    set: { value in
+                        controller.setVolume(value)
+                        if controller.isMuted { controller.setMuted(false) }
                     }
                 ),
-                in: 0...max(controller.duration, 0.01),
-                onEditingChanged: { editing in
-                    if editing {
-                        scrubTime = controller.currentTime
-                    }
-                    isScrubbing = editing
-                    if !editing {
-                        controller.seek(to: scrubTime)
-                    }
-                }
+                in: 0...100
             )
-            .disabled(!controller.isLoaded || controller.duration <= 0)
-            .focusable(false)
+            .frame(width: 72)
             .controlSize(.small)
-            .background {
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear { sliderWidth = geo.size.width }
-                        .onChange(of: geo.size.width) { _, width in
-                            sliderWidth = width
-                        }
+            .focusable(false)
+            .help("音量")
+
+            Picker("倍速", selection: Binding(
+                get: { PlaybackController.nearestSpeed(controller.speed) },
+                set: { controller.setSpeed($0) }
+            )) {
+                ForEach(PlaybackController.speedSteps, id: \.self) { speed in
+                    Text(PlaybackController.speedLabel(speed)).tag(speed)
                 }
             }
-            .onContinuousHover { phase in
-                switch phase {
-                case .active(let location):
-                    guard controller.isLoaded, controller.duration > 0 else {
-                        hoverTime = nil
-                        hoverX = nil
-                        return
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(width: 68)
+            .controlSize(.small)
+            .focusable(false)
+            .help("倍速")
+
+            Button {
+                controller.cycleLoopMode()
+            } label: {
+                Image(systemName: controller.loopMode.symbolName)
+                    .foregroundStyle(controller.loopMode == .off ? .secondary : Color.accentColor)
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .help(controller.loopMode.title)
+
+            Button {
+                controller.toggleFullscreen()
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .help("全屏")
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.30), radius: 22, y: 10)
+        .transaction { $0.animation = nil }
+    }
+
+    private var timelineSlider: some View {
+        Slider(
+            value: Binding(
+                get: { isScrubbing ? scrubTime : controller.currentTime },
+                set: { newValue in
+                    scrubTime = newValue
+                    controller.seek(to: newValue)
+                }
+            ),
+            in: 0...max(controller.duration, 0.01),
+            onEditingChanged: { editing in
+                if editing {
+                    scrubTime = controller.currentTime
+                }
+                isScrubbing = editing
+                if !editing {
+                    controller.seek(to: scrubTime)
+                }
+            }
+        )
+        .disabled(!controller.isLoaded || controller.duration <= 0)
+        .focusable(false)
+        .controlSize(.small)
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { sliderWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, width in
+                        sliderWidth = width
                     }
-                    let width = max(sliderWidth, 1)
-                    let x = min(max(location.x, 0), width)
-                    hoverX = x
-                    hoverTime = (x / width) * controller.duration
-                case .ended:
-                    hoverTime = nil
-                    hoverX = nil
-                }
-            }
-            .overlay {
-                abLoopOverlay
-            }
-            .overlay(alignment: .top) {
-                seekPreviewOverlay
-            }
-            .task(id: previewLoadID) {
-                loadPreviewImages()
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    controller.togglePlayPause()
-                } label: {
-                    Image(systemName: controller.isPaused ? "play.fill" : "pause.fill")
-                        .frame(width: 16)
-                }
-                .buttonStyle(.plain)
-                .disabled(!controller.isLoaded)
-                .focusable(false)
-                .help(controller.isPaused ? "播放" : "暂停")
-
-                Text("\(DisplayFormat.duration(displayTime)) / \(DisplayFormat.duration(controller.duration))")
-                    .font(.system(.caption, design: .monospaced))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 88, alignment: .leading)
-
-                Spacer(minLength: 8)
-
-                Button {
-                    controller.toggleMute()
-                } label: {
-                    Image(systemName: muteSymbol)
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .help(controller.isMuted ? "取消静音" : "静音")
-
-                Slider(
-                    value: Binding(
-                        get: { controller.volume },
-                        set: { value in
-                            controller.setVolume(value)
-                            if controller.isMuted { controller.setMuted(false) }
-                        }
-                    ),
-                    in: 0...100
-                )
-                .frame(width: 72)
-                .controlSize(.small)
-                .focusable(false)
-                .help("音量")
-
-                Picker("倍速", selection: Binding(
-                    get: { PlaybackController.nearestSpeed(controller.speed) },
-                    set: { controller.setSpeed($0) }
-                )) {
-                    ForEach(PlaybackController.speedSteps, id: \.self) { speed in
-                        Text(PlaybackController.speedLabel(speed)).tag(speed)
-                    }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(width: 68)
-                .focusable(false)
-                .help("倍速")
-
-                Button {
-                    controller.cycleLoopMode()
-                } label: {
-                    Image(systemName: controller.loopMode.symbolName)
-                        .foregroundStyle(controller.loopMode == .off ? .secondary : Color.accentColor)
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .help(controller.loopMode.title)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.bar)
-        .transaction { $0.animation = nil }
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let location):
+                guard controller.isLoaded, controller.duration > 0 else {
+                    hoverTime = nil
+                    hoverX = nil
+                    return
+                }
+                let width = max(sliderWidth, 1)
+                let x = min(max(location.x, 0), width)
+                hoverX = x
+                hoverTime = (x / width) * controller.duration
+            case .ended:
+                hoverTime = nil
+                hoverX = nil
+            }
+        }
+        .overlay {
+            abLoopOverlay
+        }
+        .overlay(alignment: .top) {
+            seekPreviewOverlay
+        }
+        .task(id: previewLoadID) {
+            loadPreviewImages()
+        }
     }
 
     private var displayTime: Double {
         isScrubbing ? scrubTime : controller.currentTime
+    }
+
+    private var playPauseSymbol: String {
+        !controller.isLoaded || controller.isPaused ? "play.fill" : "pause.fill"
+    }
+
+    private var playPauseHelp: String {
+        !controller.isLoaded || controller.isPaused ? "播放" : "暂停"
     }
 
     private var muteSymbol: String {

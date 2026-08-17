@@ -7,7 +7,7 @@ struct MediaListView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(spacing: 4) {
                     ForEach(env.displayedItems) { item in
                         MediaItemView(
                             item: item,
@@ -22,6 +22,7 @@ struct MediaListView: View {
                         .onDisappear { env.thumbnails.disappear(id: item.id) }
                     }
                 }
+                .padding(8)
             }
             .onAppear {
                 if let id = env.selectedID {
