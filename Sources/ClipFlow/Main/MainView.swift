@@ -86,9 +86,9 @@ struct MainView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .background {
-                    Rectangle()
-                        .fill(.thinMaterial)
-                        .opacity(0.76)
+                        Rectangle()
+                            .fill(.thinMaterial)
+                        .opacity(0.85)
                 }
         }
         .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
