@@ -23,6 +23,20 @@ struct MainView: View {
             handleDrop(urls)
         }
         .clipFlowInput()
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if !env.isBrowserVisible {
+                    Button {
+                        env.isBrowserVisible = true
+                    } label: {
+                        Image(systemName: env.browserOnRight ? "sidebar.right" : "sidebar.left")
+                    }
+                    .focusable(false)
+                    .help("显示素材浏览区")
+                    .accessibilityLabel("显示素材浏览区")
+                }
+            }
+        }
         .onAppear {
             env.applyWindowChrome()
         }
@@ -42,11 +56,6 @@ struct MainView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .topTrailing) {
-                if !env.isBrowserVisible {
-                    showBrowserButton
-                }
-            }
 
             Divider()
                 .opacity(0.45)
@@ -54,7 +63,7 @@ struct MainView: View {
             TransportBar(controller: env.playback)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(.regularMaterial)
+                .background(.thinMaterial)
         }
         .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
@@ -88,27 +97,6 @@ struct MainView: View {
                 .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
         }
         .shadow(color: .black.opacity(0.24), radius: 24, y: 10)
-    }
-
-    /// 浏览区收起后只保留一个紧凑入口，不再占用整条视频顶部空间。
-    private var showBrowserButton: some View {
-        Button {
-            env.isBrowserVisible = true
-        } label: {
-            Image(systemName: env.browserOnRight ? "sidebar.right" : "sidebar.left")
-                .font(.system(size: 13, weight: .medium))
-                .frame(width: 30, height: 28)
-        }
-        .buttonStyle(.plain)
-        .focusable(false)
-        .help("显示素材浏览区")
-        .accessibilityLabel("显示素材浏览区")
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
-        }
-        .padding(12)
     }
 
     private var splitter: some View {

@@ -35,6 +35,11 @@ enum LoopMode: Int, CaseIterable, Sendable {
 @Observable
 final class PlaybackController {
 
+    private enum Pref {
+        static let volume = "playbackVolume"
+        static let loopMode = "playbackLoopMode"
+    }
+
     // MARK: - 给界面的状态
 
     private(set) var currentTime: Double = 0
@@ -66,6 +71,16 @@ final class PlaybackController {
     @ObservationIgnored private var abSeekPending = false
 
     init() {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: Pref.volume) != nil {
+            volume = min(max(defaults.double(forKey: Pref.volume), 0), 100)
+        }
+        if defaults.object(forKey: Pref.loopMode) != nil,
+           let savedLoopMode = LoopMode(rawValue: defaults.integer(forKey: Pref.loopMode))
+        {
+            loopMode = savedLoopMode
+        }
+
         guard mpv.create() else { return }
 
         mpv.setOption("vo", "libmpv")
@@ -84,6 +99,8 @@ final class PlaybackController {
 
         wireCallbacks()
         observeFullscreen()
+        mpv.setDouble("volume", volume)
+        applyLoopFileOption()
     }
 
     deinit {
@@ -154,6 +171,7 @@ final class PlaybackController {
     func setVolume(_ value: Double) {
         let clamped = min(max(value, 0), 100)
         volume = clamped
+        UserDefaults.standard.set(clamped, forKey: Pref.volume)
         mpv.setDouble("volume", clamped)
     }
 
@@ -220,6 +238,7 @@ final class PlaybackController {
 
     func setLoopMode(_ mode: LoopMode) {
         loopMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: Pref.loopMode)
         applyLoopFileOption()
     }
 
