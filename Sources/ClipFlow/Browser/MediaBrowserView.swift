@@ -24,6 +24,21 @@ struct MediaBrowserView: View {
                     .controlSize(.small)
                     .help("排序")
                     .accessibilityLabel("排序")
+                    Button {
+                        env.sortAscending.toggle()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: env.sortAscending ? "arrow.up" : "arrow.down")
+                            Text(env.sortAscending ? "正序" : "反序")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .focusable(false)
+                    .help("切换正序 / 反序")
+                    .accessibilityLabel(env.sortAscending ? "正序" : "反序")
+                    .accessibilityHint("切换排序方向")
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)

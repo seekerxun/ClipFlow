@@ -166,6 +166,13 @@ final class ClipFlowKeyView: NSView {
             monitors.append(keyMonitor)
         }
 
+        if let clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown, handler: { [weak self] event in
+            self?.endEditingIfClickOutside(event)
+            return event
+        }) {
+            monitors.append(clickMonitor)
+        }
+
         if let mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown, handler: { [weak self] event in
             guard let self else { return event }
             guard event.buttonNumber == 2 else { return event }
@@ -216,9 +223,51 @@ final class ClipFlowKeyView: NSView {
     @discardableResult
     private func consume(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown else { return false }
-        guard shouldHandle(in: event.window) else { return false }
+        if isMenuTracking { return false }
+        if NSApp.modalWindow != nil { return false }
+        guard let window, window.isKeyWindow, window === self.window else { return false }
+        if event.window !== window { return false }
+        if window is NSPanel { return false }
+        if isEditingText(in: window) {
+            return handleSearchEscape(event)
+        }
         guard let env else { return false }
         return KeyBindings.handle(event, env: env)
+    }
+
+    /// 搜索框有焦点时 Esc 先离开搜索：有字则清空，空则交还窗口快捷键。不退出全屏。
+    private func handleSearchEscape(_ event: NSEvent) -> Bool {
+        guard event.keyCode == 53 else { return false }
+        guard let env else { return false }
+        if !env.searchText.isEmpty {
+            env.searchText = ""
+            return true
+        }
+        endTextEditing()
+        return true
+    }
+
+    private func endEditingIfClickOutside(_ event: NSEvent) {
+        guard event.type == .leftMouseDown else { return }
+        if isMenuTracking { return }
+        if NSApp.modalWindow != nil { return }
+        guard let window, event.window === window else { return }
+        guard isEditingText(in: window) else { return }
+        if isClickOnTextInput(event, in: window) { return }
+        endTextEditing()
+    }
+
+    private func endTextEditing() {
+        guard let window else { return }
+        window.endEditing(for: nil)
+        window.makeFirstResponder(self)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            if self.isEditingText(in: window) {
+                window.endEditing(for: nil)
+            }
+            window.makeFirstResponder(self)
+        }
     }
 
     private func shouldHandle(in window: NSWindow?) -> Bool {
@@ -233,6 +282,16 @@ final class ClipFlowKeyView: NSView {
     private func isEditingText(in window: NSWindow) -> Bool {
         let first = window.firstResponder
         return first is NSTextView || first is NSTextField
+    }
+
+    private func isClickOnTextInput(_ event: NSEvent, in window: NSWindow) -> Bool {
+        guard let hit = window.contentView?.hitTest(event.locationInWindow) else { return false }
+        var view: NSView? = hit
+        while let current = view {
+            if current is NSTextView || current is NSTextField { return true }
+            view = current.superview
+        }
+        return false
     }
 
     /// 把焦点收回本视图。点过按钮之后控件可能仍占着 first responder，

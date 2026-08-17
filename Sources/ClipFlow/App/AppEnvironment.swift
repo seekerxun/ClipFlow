@@ -29,6 +29,8 @@ final class AppEnvironment {
         static let sidebarWidth = "sidebarWidth"
         static let browserOnRight = "browserOnRight"
         static let showsGrid = "showsGrid"
+        static let sort = "browserSort"
+        static let sortAscending = "browserSortAscending"
     }
 
     let playback = PlaybackController()
@@ -53,7 +55,16 @@ final class AppEnvironment {
     }
     var searchText = ""
     var sort: BrowserSort = .name {
-        didSet { thumbnails.sync(items: sortedItems, records: records) }
+        didSet {
+            UserDefaults.standard.set(sort.rawValue, forKey: Pref.sort)
+            thumbnails.sync(items: sortedItems, records: records)
+        }
+    }
+    var sortAscending = true {
+        didSet {
+            UserDefaults.standard.set(sortAscending, forKey: Pref.sortAscending)
+            thumbnails.sync(items: sortedItems, records: records)
+        }
     }
 
     @ObservationIgnored private let folderWatcher = FolderWatcher()
@@ -96,6 +107,14 @@ final class AppEnvironment {
         }
         browserOnRight = defaults.bool(forKey: Pref.browserOnRight)
         showsGrid = defaults.bool(forKey: Pref.showsGrid)
+        if let raw = defaults.string(forKey: Pref.sort), let saved = BrowserSort(rawValue: raw) {
+            sort = saved
+        }
+        if defaults.object(forKey: Pref.sortAscending) != nil {
+            sortAscending = defaults.bool(forKey: Pref.sortAscending)
+        } else {
+            sortAscending = (sort == .name)
+        }
         folderWatcher.onDebouncedChange = { [weak self] in
             self?.handleFolderChange()
         }
@@ -283,16 +302,18 @@ final class AppEnvironment {
         list.sorted { lhs, rhs in
             switch sort {
             case .name:
-                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                return compareName(lhs.name, rhs.name)
             case .duration:
-                return compareDescending(
+                return compareOptional(
                     records[lhs.id]?.duration, records[rhs.id]?.duration, lhs, rhs
                 )
             case .resolution:
-                return compareDescending(pixelCount(lhs), pixelCount(rhs), lhs, rhs)
+                return compareOptional(pixelCount(lhs), pixelCount(rhs), lhs, rhs)
             case .date:
                 if lhs.key.modified != rhs.key.modified {
-                    return lhs.key.modified > rhs.key.modified
+                    return sortAscending
+                        ? lhs.key.modified < rhs.key.modified
+                        : lhs.key.modified > rhs.key.modified
                 }
                 return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
             }
@@ -306,7 +327,20 @@ final class AppEnvironment {
         return Double(width * height)
     }
 
-    private func compareDescending(
+    /// 名称无论正反都走自然序，避免 10.mp4 排到 9.mp4 前面。
+    private func compareName(_ lhs: String, _ rhs: String) -> Bool {
+        switch lhs.localizedStandardCompare(rhs) {
+        case .orderedAscending:
+            return sortAscending
+        case .orderedDescending:
+            return !sortAscending
+        case .orderedSame:
+            return false
+        }
+    }
+
+    /// 缺元数据的条目始终靠后；同值再用名称自然序。
+    private func compareOptional(
         _ a: Double?,
         _ b: Double?,
         _ lhs: MediaItem,
@@ -314,7 +348,9 @@ final class AppEnvironment {
     ) -> Bool {
         switch (a, b) {
         case let (l?, r?):
-            if l != r { return l > r }
+            if l != r {
+                return sortAscending ? l < r : l > r
+            }
         case (nil, .some):
             return false
         case (.some, nil):
