@@ -30,6 +30,7 @@
   | Cursor / Grok         | Cursor    | `cursoragent@cursor.com` |
   | Claude                | Claude    | `noreply@anthropic.com`  |
 - 满足以上条件时直接本地 commit，不需要每次都先询问用户确认；push 仍需用户另行明确同意。
+- **每次提交前把构建号加 1。** 改 `project.yml` 里的 `CURRENT_PROJECT_VERSION`（应用的构建号，对应 Xcode 的 Build），然后跑 `xcodegen generate`。对外显示的版本号 `MARKETING_VERSION`（现在是 0.1.0）只在真正发新版本时改，不要每次提交都动。
 
 ## 编码与行尾规则
 

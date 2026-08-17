@@ -53,6 +53,8 @@ xcodegen generate
 
 之后正常用 Xcode 打开 `ClipFlow.xcodeproj` 即可。加减源文件不需要改工程，`Sources/ClipFlow` 下的文件会自动纳入；只有改构建设置时才需要动 `project.yml` 并重新生成。
 
+Archive / Release 必须只编**当前这台 Mac 的架构**。Homebrew 的 `libmpv` 不是通用二进制；若目的地选 Any Mac，会去链一套不存在的 Intel 库，所有 mpv 符号都会报找不到。工程里已关掉「编全部架构」。在 Xcode 里 Archive 时目的地选 My Mac。动态链接本机 Homebrew，打出来的包也只能在装了 mpv 的同类机器上跑。
+
 命令行构建与跑基准：
 
 ```bash
