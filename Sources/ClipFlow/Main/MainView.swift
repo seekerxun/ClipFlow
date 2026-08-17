@@ -21,16 +21,34 @@ struct MainView: View {
         .background {
             ZStack {
                 DockGlassBackground()
-                Color(red: 0.40, green: 0.30, blue: 0.92)
-                    .opacity(0.025)
+                Color(red: 0.10, green: 0.36, blue: 0.96)
+                    .opacity(0.035)
                 RadialGradient(
                     colors: [
-                        Color(red: 0.40, green: 0.30, blue: 0.92).opacity(0.06),
+                        Color(red: 0.00, green: 0.78, blue: 0.94).opacity(0.11),
+                        .clear,
+                    ],
+                    center: .topLeading,
+                    startRadius: 0,
+                    endRadius: 900
+                )
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.08, green: 0.40, blue: 1.00).opacity(0.09),
+                        .clear,
+                    ],
+                    center: .bottomLeading,
+                    startRadius: 0,
+                    endRadius: 950
+                )
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.53, green: 0.18, blue: 0.95).opacity(0.12),
                         .clear,
                     ],
                     center: .bottomTrailing,
                     startRadius: 0,
-                    endRadius: 1_100
+                    endRadius: 1_050
                 )
             }
             .ignoresSafeArea()
