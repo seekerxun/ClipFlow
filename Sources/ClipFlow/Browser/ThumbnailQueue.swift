@@ -60,20 +60,36 @@ final class ThumbnailQueue {
         doneCover.removeAll()
         doneSprite.removeAll()
         for (id, rec) in records {
-            if rec.failure != nil {
-                failedIDs.insert(id)
-                continue
-            }
-            if rec.hasCover, ThumbnailStore.hasCover(digest: id) {
-                doneCover.insert(id)
-            }
-            if rec.hasSprite, ThumbnailStore.hasSprite(digest: id) {
-                doneSprite.insert(id)
-            }
+            remember(rec, id: id)
         }
         orderedIDs = items.map(\.id)
         itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
         try? ThumbnailStore.prepareDirectories()
+    }
+
+    /// 目录有增减时接上新条目、拿掉消失的。不换代、不把已有条目重新入队。
+    func sync(items: [MediaItem], records: [String: IndexRecord] = [:]) {
+        let newIDs = Set(items.map(\.id))
+        let oldIDs = Set(orderedIDs)
+
+        for id in oldIDs where !newIDs.contains(id) {
+            jobs.removeValue(forKey: id)
+            visibleIDs.remove(id)
+            failedIDs.remove(id)
+            doneCover.remove(id)
+            doneSprite.remove(id)
+        }
+
+        for item in items where !oldIDs.contains(item.id) {
+            if let rec = records[item.id] {
+                remember(rec, id: item.id)
+            }
+        }
+
+        orderedIDs = items.map(\.id)
+        itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        pendingCount = jobs.count
+        refreshWindow()
     }
 
     func appear(id: String) {
@@ -252,6 +268,19 @@ final class ThumbnailQueue {
         }
         pendingCount = jobs.count
         pump()
+    }
+
+    private func remember(_ rec: IndexRecord, id: String) {
+        if rec.failure != nil {
+            failedIDs.insert(id)
+            return
+        }
+        if rec.hasCover, ThumbnailStore.hasCover(digest: id) {
+            doneCover.insert(id)
+        }
+        if rec.hasSprite, ThumbnailStore.hasSprite(digest: id) {
+            doneSprite.insert(id)
+        }
     }
 
     private struct Job {

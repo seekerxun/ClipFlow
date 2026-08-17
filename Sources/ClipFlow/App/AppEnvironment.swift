@@ -2,10 +2,35 @@ import AppKit
 import Foundation
 import Observation
 
+enum BrowserSort: String, CaseIterable, Identifiable {
+    case name
+    case duration
+    case resolution
+    case date
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .name: return "名称"
+        case .duration: return "时长"
+        case .resolution: return "分辨率"
+        case .date: return "日期"
+        }
+    }
+}
+
 /// 应用级共享对象：播放、索引、浏览状态都从这里拿。
 @MainActor
 @Observable
 final class AppEnvironment {
+    private enum Pref {
+        static let lastFolder = "lastFolderPath"
+        static let sidebarWidth = "sidebarWidth"
+        static let browserOnRight = "browserOnRight"
+        static let showsGrid = "showsGrid"
+    }
+
     let playback = PlaybackController()
     let index: MediaIndex
     let thumbnails: ThumbnailQueue
@@ -16,14 +41,40 @@ final class AppEnvironment {
     var folderURL: URL?
     var skippedCount = 0
     var isBrowserVisible = true
-    var browserOnRight = false
-    var sidebarWidth: Double = 320
+    var browserOnRight = false {
+        didSet { UserDefaults.standard.set(browserOnRight, forKey: Pref.browserOnRight) }
+    }
+    var sidebarWidth: Double = 320 {
+        didSet { UserDefaults.standard.set(sidebarWidth, forKey: Pref.sidebarWidth) }
+    }
     var shouldScrollToSelection = false
-    /// 本次运行内记住；跨启动持久化是 V2。
-    var showsGrid = false
+    var showsGrid = false {
+        didSet { UserDefaults.standard.set(showsGrid, forKey: Pref.showsGrid) }
+    }
+    var searchText = ""
+    var sort: BrowserSort = .name {
+        didSet { thumbnails.sync(items: sortedItems, records: records) }
+    }
+
+    @ObservationIgnored private let folderWatcher = FolderWatcher()
+    @ObservationIgnored private var folderGeneration = 0
+    @ObservationIgnored private var didAttemptRestore = false
 
     var selectedItem: MediaItem? {
         items.first { $0.id == selectedID }
+    }
+
+    /// 当前排序下的全部条目，搜索不影响抽帧队列。
+    var sortedItems: [MediaItem] {
+        sortItems(items)
+    }
+
+    /// 列表 / 网格 / 上一个下一个用这一份。
+    var displayedItems: [MediaItem] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = sortedItems
+        if q.isEmpty { return source }
+        return source.filter { $0.name.localizedStandardContains(q) }
     }
 
     init() {
@@ -39,7 +90,19 @@ final class AppEnvironment {
         playback.onPlaybackEnded = { [weak self] in
             self?.handlePlaybackEnded()
         }
-        Task { await index.load() }
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: Pref.sidebarWidth) != nil {
+            sidebarWidth = min(max(defaults.double(forKey: Pref.sidebarWidth), 200), 560)
+        }
+        browserOnRight = defaults.bool(forKey: Pref.browserOnRight)
+        showsGrid = defaults.bool(forKey: Pref.showsGrid)
+        folderWatcher.onDebouncedChange = { [weak self] in
+            self?.handleFolderChange()
+        }
+        Task {
+            await index.load()
+            await self.restoreLastFolderIfNeeded()
+        }
     }
 
     // MARK: - 目录
@@ -56,16 +119,33 @@ final class AppEnvironment {
     }
 
     func openFolder(_ url: URL) async {
+        folderGeneration += 1
+        let gen = folderGeneration
+        folderWatcher.stop()
+
+        let path = url.path(percentEncoded: false)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            guard gen == folderGeneration else { return }
+            clearFolderQuietly(forgetSavedPath: false)
+            return
+        }
+
         folderURL = url
-        NSApp.keyWindow?.representedURL = url
-        NSApp.keyWindow?.title = url.lastPathComponent
+        applyWindowChrome()
+        UserDefaults.standard.set(path, forKey: Pref.lastFolder)
 
         thumbnails.reset(items: [])
         playback.pause()
         selectedID = nil
         records = [:]
 
-        let result = MediaScanner.scan(root: url)
+        let scanned = url
+        let result = await Task.detached {
+            MediaScanner.scan(root: scanned)
+        }.value
+        guard gen == folderGeneration else { return }
+
         items = result.items
         skippedCount = result.skippedCount
 
@@ -77,17 +157,172 @@ final class AppEnvironment {
             }
         }
         records = recs
-        thumbnails.reset(items: items, records: recs)
+        thumbnails.reset(items: sortedItems, records: recs)
 
-        if let first = items.first {
+        if let first = displayedItems.first {
             select(first)
         }
 
+        folderWatcher.start(path: path)
+
         Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
-            guard folderURL == url else { return }
+            guard gen == folderGeneration else { return }
             thumbnails.armIdleFill()
         }
+    }
+
+    func restoreLastFolderIfNeeded() async {
+        guard !didAttemptRestore else { return }
+        didAttemptRestore = true
+        guard folderURL == nil else { return }
+        guard let path = UserDefaults.standard.string(forKey: Pref.lastFolder), !path.isEmpty else {
+            return
+        }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            return
+        }
+        await openFolder(URL(fileURLWithPath: path, isDirectory: true))
+    }
+
+    func applyWindowChrome() {
+        guard let window = NSApp.keyWindow else { return }
+        if let url = folderURL {
+            window.representedURL = url
+            window.title = url.lastPathComponent
+        } else {
+            window.representedURL = nil
+            window.title = "ClipFlow"
+        }
+    }
+
+    // MARK: - 目录变化
+
+    private func handleFolderChange() {
+        Task { await refreshOpenFolder() }
+    }
+
+    private func refreshOpenFolder() async {
+        guard let url = folderURL else { return }
+        let gen = folderGeneration
+        let path = url.path(percentEncoded: false)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            guard gen == folderGeneration else { return }
+            clearFolderQuietly(forgetSavedPath: false)
+            return
+        }
+
+        let scanned = url
+        let result = await Task.detached {
+            MediaScanner.scan(root: scanned)
+        }.value
+        guard gen == folderGeneration,
+              folderURL?.path(percentEncoded: false) == url.path(percentEncoded: false)
+        else { return }
+        await applyIncrementalScan(result)
+    }
+
+    private func applyIncrementalScan(_ result: MediaScanner.Result) async {
+        let oldIDs = Set(items.map(\.id))
+        let newIDs = Set(result.items.map(\.id))
+        if oldIDs == newIDs, skippedCount == result.skippedCount {
+            return
+        }
+
+        let added = result.items.filter { !oldIDs.contains($0.id) }
+        var recs = records
+        for id in oldIDs where !newIDs.contains(id) {
+            recs.removeValue(forKey: id)
+        }
+        for item in added {
+            if let record = await index.record(for: item.key) {
+                recs[item.id] = record
+            }
+        }
+
+        let wasEmpty = items.isEmpty
+        let previousSelected = selectedID
+        items = result.items
+        skippedCount = result.skippedCount
+        records = recs
+        thumbnails.sync(items: sortedItems, records: recs)
+
+        if let previousSelected, newIDs.contains(previousSelected) {
+            return
+        }
+        if previousSelected != nil {
+            playback.pause()
+            selectedID = nil
+        }
+        if wasEmpty, let first = displayedItems.first {
+            select(first)
+        }
+    }
+
+    private func clearFolderQuietly(forgetSavedPath: Bool) {
+        folderWatcher.stop()
+        folderURL = nil
+        items = []
+        records = [:]
+        selectedID = nil
+        skippedCount = 0
+        searchText = ""
+        thumbnails.reset(items: [])
+        playback.pause()
+        if forgetSavedPath {
+            UserDefaults.standard.removeObject(forKey: Pref.lastFolder)
+        }
+        applyWindowChrome()
+    }
+
+    // MARK: - 排序
+
+    private func sortItems(_ list: [MediaItem]) -> [MediaItem] {
+        list.sorted { lhs, rhs in
+            switch sort {
+            case .name:
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            case .duration:
+                return compareDescending(
+                    records[lhs.id]?.duration, records[rhs.id]?.duration, lhs, rhs
+                )
+            case .resolution:
+                return compareDescending(pixelCount(lhs), pixelCount(rhs), lhs, rhs)
+            case .date:
+                if lhs.key.modified != rhs.key.modified {
+                    return lhs.key.modified > rhs.key.modified
+                }
+                return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+            }
+        }
+    }
+
+    private func pixelCount(_ item: MediaItem) -> Double? {
+        guard let width = records[item.id]?.width, let height = records[item.id]?.height else {
+            return nil
+        }
+        return Double(width * height)
+    }
+
+    private func compareDescending(
+        _ a: Double?,
+        _ b: Double?,
+        _ lhs: MediaItem,
+        _ rhs: MediaItem
+    ) -> Bool {
+        switch (a, b) {
+        case let (l?, r?):
+            if l != r { return l > r }
+        case (nil, .some):
+            return false
+        case (.some, nil):
+            return true
+        default:
+            break
+        }
+        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
     }
 
     // MARK: - 选中即播
@@ -103,17 +338,21 @@ final class AppEnvironment {
     }
 
     func selectOffset(_ delta: Int, wrap: Bool) {
-        guard !items.isEmpty else { return }
-        let current = items.firstIndex(where: { $0.id == selectedID }) ?? 0
+        let list = displayedItems
+        guard !list.isEmpty else { return }
         let next: Int
-        if wrap {
-            next = (current + delta + items.count) % items.count
+        if let current = list.firstIndex(where: { $0.id == selectedID }) {
+            if wrap {
+                next = (current + delta + list.count) % list.count
+            } else {
+                let raw = current + delta
+                guard list.indices.contains(raw) else { return }
+                next = raw
+            }
         } else {
-            let raw = current + delta
-            guard items.indices.contains(raw) else { return }
-            next = raw
+            next = delta >= 0 ? 0 : list.count - 1
         }
-        select(items[next], scroll: true)
+        select(list[next], scroll: true)
     }
 
     /// 播完由播放内核通知。单个循环在控制器里处理；列表循环回头；关闭则自动下一个但不回头。

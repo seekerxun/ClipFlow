@@ -22,6 +22,9 @@ struct MainView: View {
             handleDrop(urls)
         }
         .clipFlowInput()
+        .onAppear {
+            env.applyWindowChrome()
+        }
     }
 
     private var browserPane: some View {

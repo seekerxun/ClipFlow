@@ -1,12 +1,33 @@
 import SwiftUI
 
-/// 素材浏览区容器：列表 / 网格切换。当前模式只记在这次运行里。
+/// 素材浏览区容器：列表 / 网格切换。布局会记住。
 struct MediaBrowserView: View {
     @Environment(AppEnvironment.self) private var env
 
     var body: some View {
+        @Bindable var env = env
         VStack(spacing: 0) {
             header
+            if env.folderURL != nil {
+                HStack(spacing: 8) {
+                    TextField("搜索文件名", text: $env.searchText)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                    Picker("排序", selection: $env.sort) {
+                        ForEach(BrowserSort.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize()
+                    .controlSize(.small)
+                    .help("排序")
+                    .accessibilityLabel("排序")
+                }
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+            }
             Divider()
             if env.showsGrid {
                 MediaGridView()
@@ -24,9 +45,7 @@ struct MediaBrowserView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
             layoutPicker
-            Text("\(env.items.count)")
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+            countLabel
             Button {
                 env.browserOnRight.toggle()
             } label: {
@@ -49,6 +68,16 @@ struct MediaBrowserView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+
+    private var countLabel: some View {
+        let query = env.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = query.isEmpty
+            ? "\(env.items.count)"
+            : "\(env.displayedItems.count)/\(env.items.count)"
+        return Text(text)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
     }
 
     private var layoutPicker: some View {

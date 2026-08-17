@@ -8,7 +8,7 @@ struct MediaListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(env.items) { item in
+                    ForEach(env.displayedItems) { item in
                         MediaItemView(
                             item: item,
                             record: env.records[item.id],

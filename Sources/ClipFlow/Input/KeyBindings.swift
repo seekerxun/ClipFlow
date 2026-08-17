@@ -120,6 +120,7 @@ final class ClipFlowKeyView: NSView {
     private var monitors: [Any] = []
     private var observers: [NSObjectProtocol] = []
     private var isMenuTracking = false
+    private static var didRestoreFrame = false
 
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { false }
@@ -134,8 +135,16 @@ final class ClipFlowKeyView: NSView {
         super.viewDidMoveToWindow()
         if window != nil {
             start()
+            if let window {
+                if !Self.didRestoreFrame {
+                    window.setFrameUsingName("ClipFlowMain")
+                    Self.didRestoreFrame = true
+                }
+                window.setFrameAutosaveName("ClipFlowMain")
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.reclaimKeyFocus()
+                self?.env?.applyWindowChrome()
             }
         } else {
             stop()

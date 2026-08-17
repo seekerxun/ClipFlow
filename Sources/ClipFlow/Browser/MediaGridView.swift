@@ -12,7 +12,7 @@ struct MediaGridView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVGrid(columns: columns(for: geo.size), spacing: 3) {
-                        ForEach(env.items) { item in
+                        ForEach(env.displayedItems) { item in
                             MediaItemView(
                                 item: item,
                                 record: env.records[item.id],
