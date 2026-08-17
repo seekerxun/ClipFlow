@@ -14,12 +14,12 @@
 | 阶段 | 状态 |
 |---|---|
 | **V0** 风险验证 | ✅ 完成。`--wid` 实测不可行，已改走 render API |
-| **V1** 可用 | 🔵 进行中，第 1–4 块已完成并实测达标 |
+| **V1** 可用 | 🔵 进行中，第 1–5 块已完成 |
 | └ 1. 扫描与索引 | ✅ 完成（差界面入口） |
 | └ 2. 精灵图流水线 | ✅ 完成（ffmpeg 回退路径暂缓） |
 | └ 3. 封面帧选取 | ✅ 完成（差 `C` 键与偏好设置，都要等界面） |
 | └ 4. 调度 | 🔵 并发上限与两阶段拆分已完成；**可见优先级调度未做**，要跟界面一起 |
-| └ **5. 播放** | ⬜ **未开始 ← 下一步** |
+| └ **5. 播放** | ✅ 完成（画面能嵌进 SwiftUI；F/Esc 快捷键留给第 6 块） |
 | └ **6. 界面与输入** | ⬜ **未开始 ← 下一步** |
 | **V1.1 / V2 / 暂缓** | ⬜ 未开始 |
 
@@ -36,7 +36,7 @@ V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程，**播放�
 
 ### 下一步要做什么
 
-按顺序做 V1 的第 5、6 块：先让画面能放出来，再把素材墙和键盘操作搭上。做完的判据是「能用键盘从头到尾扫完一个真实目录」，详见 V1 完成标准。
+接下来做 V1 第 6 块：左右布局、素材墙、选中即播、快捷键。播放内核已就位，界面从 `AppEnvironment.playback` 接线。做完的判据是「能用键盘从头到尾扫完一个真实目录」，详见 V1 完成标准。
 
 ---
 
@@ -136,15 +136,15 @@ V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程，**播放�
 
 ### 5. 播放
 
-- [ ] `MPVRenderBackend` protocol + `MPVGLBackend` 实现（渲染后端必须可替换）
-- [ ] 从 spike 搬运：render context 建立、update callback、`reshape` 重绘
-- [ ] `PlaybackController`（`@Observable`），单实例 + `loadfile`
-- [ ] 启动参数：`--vo=libmpv --idle=yes --keep-open=yes --hr-seek=yes --cache=yes`
-- [ ] 所有 mpv 命令走 `mpv_command_async`（同步版本会死锁）
-- [ ] 监听 `end-file` 事件驱动自动播放下一个（不用 mpv 的 playlist）
-- [ ] 播放 / 暂停 / seek / 音量 / 静音 / 倍速
-- [ ] 循环模式：单个循环 / 列表循环 / 关闭
-- [ ] 全屏 / 退出全屏
+- [x] `MPVRenderBackend` protocol + `MPVGLBackend` 实现（渲染后端必须可替换）
+- [x] 从 spike 搬运：render context 建立、update callback、`reshape` 重绘
+- [x] `PlaybackController`（`@Observable`），单实例 + `loadfile`
+- [x] 启动参数：`--vo=libmpv --idle=yes --keep-open=yes --hr-seek=yes --cache=yes`
+- [x] 所有 mpv 命令走 `mpv_command_async`（同步版本会死锁）
+- [x] 监听 `end-file` 事件驱动自动播放下一个（不用 mpv 的 playlist）
+- [x] 播放 / 暂停 / seek / 音量 / 静音 / 倍速
+- [x] 循环模式：单个循环 / 列表循环 / 关闭
+- [x] 全屏状态 + `toggleFullscreen()` 接到 `NSWindow.toggleFullScreen`（F / Esc 快捷键留给第 6 块）
 
 ### 6. 界面与输入
 

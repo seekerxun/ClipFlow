@@ -12,9 +12,12 @@ struct ClipFlowMain {
 }
 
 struct ClipFlowApp: App {
+    @State private var environment = AppEnvironment()
+
     var body: some Scene {
         WindowGroup("ClipFlow") {
             MainView()
+                .environment(environment)
         }
         .defaultSize(width: 1280, height: 800)
         .commands {

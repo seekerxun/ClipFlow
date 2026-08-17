@@ -1,17 +1,10 @@
 import SwiftUI
 
-/// 主界面。左侧素材浏览区 + 右侧播放区，界面部分尚未搭建。
-///
-/// 当前阶段先把扫描 / 索引 / 预览图这条流水线跑通并量出性能数据，
-/// 用 `CLIPFLOW_BENCH=<目录> ClipFlow.app/Contents/MacOS/ClipFlow` 验证。
+/// 主界面。第 6 块会做成左侧素材浏览 + 右侧播放；本块先把画面嵌进来，无素材时空白。
 struct MainView: View {
+    @Environment(AppEnvironment.self) private var env
+
     var body: some View {
-        VStack(spacing: 12) {
-            Text("ClipFlow")
-                .font(.largeTitle.weight(.semibold))
-            Text("索引流水线已就位，界面搭建中")
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        PlayerView(controller: env.playback)
     }
 }
