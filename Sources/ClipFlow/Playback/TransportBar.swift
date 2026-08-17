@@ -1,11 +1,18 @@
 import SwiftUI
 
-/// 播放控制条：播放/暂停、进度、音量/静音、倍速、循环。不做进度条预览。
+/// 播放控制条：播放/暂停、进度、音量/静音、倍速、循环。进度条 hover 读精灵图预览。
 struct TransportBar: View {
     var controller: PlaybackController
 
+    @Environment(AppEnvironment.self) private var env
+
     @State private var isScrubbing = false
     @State private var scrubTime: Double = 0
+    @State private var hoverTime: Double?
+    @State private var hoverX: CGFloat?
+    @State private var sliderWidth: CGFloat = 0
+    @State private var spriteCG: CGImage?
+    @State private var coverImage: NSImage?
 
     var body: some View {
         VStack(spacing: 4) {
@@ -31,6 +38,38 @@ struct TransportBar: View {
             .disabled(!controller.isLoaded || controller.duration <= 0)
             .focusable(false)
             .controlSize(.small)
+            .background {
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { sliderWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, width in
+                            sliderWidth = width
+                        }
+                }
+            }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    guard controller.isLoaded, controller.duration > 0 else {
+                        hoverTime = nil
+                        hoverX = nil
+                        return
+                    }
+                    let width = max(sliderWidth, 1)
+                    let x = min(max(location.x, 0), width)
+                    hoverX = x
+                    hoverTime = (x / width) * controller.duration
+                case .ended:
+                    hoverTime = nil
+                    hoverX = nil
+                }
+            }
+            .overlay(alignment: .top) {
+                seekPreviewOverlay
+            }
+            .task(id: previewLoadID) {
+                loadPreviewImages()
+            }
 
             HStack(spacing: 10) {
                 Button {
@@ -115,5 +154,76 @@ struct TransportBar: View {
         if controller.isMuted || controller.volume <= 0 { return "speaker.slash.fill" }
         if controller.volume < 40 { return "speaker.wave.1.fill" }
         return "speaker.wave.3.fill"
+    }
+
+    private var previewDigest: String? { env.selectedID }
+
+    private var previewRecord: IndexRecord? {
+        guard let id = env.selectedID else { return nil }
+        return env.records[id]
+    }
+
+    private var previewLoadID: String {
+        let digest = previewDigest ?? ""
+        let sprite = previewRecord?.hasSprite == true
+        let cover = previewRecord?.coverTime ?? -1
+        let manual = previewRecord?.manualCoverTime ?? -1
+        return "\(digest)-\(sprite)-\(cover)-\(manual)"
+    }
+
+    private var previewTime: Double? {
+        if isScrubbing { return scrubTime }
+        return hoverTime
+    }
+
+    private var previewX: CGFloat? {
+        if isScrubbing, controller.duration > 0, sliderWidth > 0 {
+            return min(max(scrubTime / controller.duration * sliderWidth, 0), sliderWidth)
+        }
+        return hoverX
+    }
+
+    @ViewBuilder
+    private var seekPreviewOverlay: some View {
+        if let time = previewTime, let x = previewX, let image = previewImage(at: time) {
+            SeekPreview(image: image, time: time)
+                .fixedSize()
+                .frame(width: 0, height: 0, alignment: .bottom)
+                .offset(x: previewOffsetX(hoverX: x), y: -6)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func previewOffsetX(hoverX: CGFloat) -> CGFloat {
+        let half = CGFloat(SpriteSpec.maxTileDimension) / 2
+        let raw = hoverX - sliderWidth / 2
+        guard sliderWidth > CGFloat(SpriteSpec.maxTileDimension) else { return 0 }
+        let minDX = half - sliderWidth / 2
+        let maxDX = sliderWidth / 2 - half
+        return min(max(raw, minDX), maxDX)
+    }
+
+    private func previewImage(at time: Double) -> NSImage? {
+        if let spriteCG {
+            let index = SeekPreview.frameIndex(
+                time: time,
+                timestamps: previewRecord?.spriteTimestamps ?? [],
+                duration: controller.duration
+            )
+            if let tile = SeekPreview.tile(from: spriteCG, record: previewRecord, index: index) {
+                return tile
+            }
+        }
+        return coverImage
+    }
+
+    private func loadPreviewImages() {
+        guard let digest = previewDigest else {
+            spriteCG = nil
+            coverImage = nil
+            return
+        }
+        spriteCG = SeekPreview.loadSprite(digest: digest)
+        coverImage = SeekPreview.loadCover(digest: digest)
     }
 }
