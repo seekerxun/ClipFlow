@@ -11,6 +11,22 @@ enum LoopMode: Int, CaseIterable, Sendable {
     case single
     /// 列表循环：通知上层换下一项，播到末尾再回到第一项。
     case playlist
+
+    var title: String {
+        switch self {
+        case .off: return "关闭循环"
+        case .single: return "单个循环"
+        case .playlist: return "列表循环"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .off: return "repeat"
+        case .single: return "repeat.1"
+        case .playlist: return "repeat"
+        }
+    }
 }
 
 /// 播放状态机。单实例 + `loadfile`，不预载。
@@ -144,10 +160,33 @@ final class PlaybackController {
         setMuted(!isMuted)
     }
 
+    static let speedSteps: [Double] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+
     func setSpeed(_ value: Double) {
         let clamped = min(max(value, 0.25), 4)
         speed = clamped
         mpv.setDouble("speed", clamped)
+    }
+
+    func nudgeSpeed(_ direction: Int) {
+        if direction > 0 {
+            if let next = Self.speedSteps.first(where: { $0 > speed + 0.01 }) {
+                setSpeed(next)
+            }
+        } else if let next = Self.speedSteps.last(where: { $0 < speed - 0.01 }) {
+            setSpeed(next)
+        }
+    }
+
+    static func nearestSpeed(_ value: Double) -> Double {
+        speedSteps.min(by: { abs($0 - value) < abs($1 - value) }) ?? 1
+    }
+
+    static func speedLabel(_ value: Double) -> String {
+        if abs(value - value.rounded()) < 0.01 {
+            return String(format: "%.0f×", value.rounded())
+        }
+        return String(format: "%g×", value)
     }
 
     func setLoopMode(_ mode: LoopMode) {
@@ -155,12 +194,22 @@ final class PlaybackController {
         mpv.setString("loop-file", mode == .single ? "inf" : "no")
     }
 
+    func cycleLoopMode() {
+        let all = LoopMode.allCases
+        let index = all.firstIndex(of: loopMode) ?? 0
+        setLoopMode(all[(index + 1) % all.count])
+    }
+
     func toggleFullscreen() {
         NSApp.keyWindow?.toggleFullScreen(nil)
     }
 
+    func exitFullscreen() {
+        guard isFullscreen else { return }
+        NSApp.keyWindow?.toggleFullScreen(nil)
+    }
+
     /// 给 C 键抽封面用：直接问 mpv 当前时间，绕开属性事件的推送延迟。
-    /// C 键本身本块不做。
     func currentPlaybackTime() -> Double? {
         mpv.double("time-pos")
     }

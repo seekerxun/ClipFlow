@@ -27,7 +27,9 @@ final class AppEnvironment {
     init() {
         let index = MediaIndex()
         self.index = index
-        let queue = ThumbnailQueue(index: index)
+        let startFraction = (UserDefaults.standard.object(forKey: "coverStartFraction") as? Double)
+            ?? CoverPicker.defaultStartFraction
+        let queue = ThumbnailQueue(index: index, startFraction: startFraction)
         self.thumbnails = queue
         queue.onRecord = { [weak self] record in
             self?.records[record.key.digest] = record
@@ -121,6 +123,39 @@ final class AppEnvironment {
             selectOffset(1, wrap: true)
         case .off:
             selectOffset(1, wrap: false)
+        }
+    }
+
+    // MARK: - C 键封面
+
+    /// 把当前播放帧写成封面。走 AVFoundation，不用 mpv screenshot。
+    func captureCoverFromCurrentFrame() {
+        guard let item = selectedItem else { return }
+        var seconds = playback.currentPlaybackTime() ?? playback.currentTime
+        guard seconds.isFinite, seconds >= 0 else { return }
+        if playback.duration > 0 {
+            seconds = min(seconds, max(playback.duration - 0.04, 0))
+        }
+        Task { await applyManualCover(item: item, seconds: seconds) }
+    }
+
+    private func applyManualCover(item: MediaItem, seconds: Double) async {
+        do {
+            let output = try await SpriteGenerator.generateCover(url: item.url, at: seconds)
+            try ThumbnailStore.writeCover(output.coverJPEG, digest: item.key.digest)
+            var record = await index.record(for: item.key) ?? IndexRecord(key: item.key)
+            if record.duration == nil, playback.duration > 0 {
+                record.duration = playback.duration
+            }
+            record.coverTime = output.coverTime
+            record.manualCoverTime = output.coverTime
+            record.coverIsFallback = false
+            record.failure = nil
+            await index.upsert(record)
+            try? await index.save()
+            records[item.id] = record
+        } catch {
+            NSLog("封面抓取失败: \(error)")
         }
     }
 }

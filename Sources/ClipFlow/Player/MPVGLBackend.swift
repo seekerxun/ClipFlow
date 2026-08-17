@@ -34,6 +34,10 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
         wantsBestResolutionOpenGLSurface = true
     }
 
+    /// 键盘归 SwiftUI，画面不抢焦点。
+    override var acceptsFirstResponder: Bool { false }
+    override var canBecomeKeyView: Bool { false }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 

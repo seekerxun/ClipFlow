@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 播放画面区域。先把 libmpv 的画面嵌进 SwiftUI；控制条和快捷键留给第 6 块。
+/// 播放画面区域。控制条在 `TransportBar`，快捷键在根视图。
 struct PlayerView: View {
     let controller: PlaybackController
 

@@ -113,12 +113,25 @@ enum IndexingPipeline {
 
             switch stage {
             case .cover:
-                let cover = try await SpriteGenerator.generateCover(
-                    url: item.url, info: info, startFraction: startFraction
-                )
-                try ThumbnailStore.writeCover(cover.coverJPEG, digest: item.key.digest)
-                record.coverTime = cover.coverTime
-                record.coverIsFallback = cover.isFallback
+                if let manual = record.manualCoverTime {
+                    let cover = try await SpriteGenerator.generateCover(url: item.url, at: manual)
+                    try ThumbnailStore.writeCover(cover.coverJPEG, digest: item.key.digest)
+                    record.coverTime = cover.coverTime
+                    record.coverIsFallback = false
+                    record.manualCoverTime = manual
+                } else {
+                    let cover = try await SpriteGenerator.generateCover(
+                        url: item.url, info: info, startFraction: startFraction
+                    )
+                    if let latest = await index.record(for: item.key),
+                       latest.manualCoverTime != nil
+                    {
+                        return .succeeded
+                    }
+                    try ThumbnailStore.writeCover(cover.coverJPEG, digest: item.key.digest)
+                    record.coverTime = cover.coverTime
+                    record.coverIsFallback = cover.isFallback
+                }
 
             case .sprite:
                 let sprite = try await SpriteGenerator.generate(url: item.url, info: info)

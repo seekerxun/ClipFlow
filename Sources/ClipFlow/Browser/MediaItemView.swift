@@ -32,9 +32,17 @@ struct MediaItemView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
-        .task(id: "\(item.id)-\(record?.coverTime ?? -1)-\(record?.hasSprite == true)") {
+        .task(id: coverTaskID) {
             loadImages()
         }
+    }
+
+    private var coverTaskID: String {
+        let url = ThumbnailStore.coverURL(digest: item.key.digest)
+        let modified = (try? FileManager.default.attributesOfItem(
+            atPath: url.path(percentEncoded: false)
+        )[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(item.id)-\(modified)-\(record?.manualCoverTime ?? -1)-\(record?.hasSprite == true)"
     }
 
     private var subtitle: String? {

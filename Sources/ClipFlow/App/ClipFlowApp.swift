@@ -31,6 +31,7 @@ struct ClipFlowApp: App {
                 Button(environment.isBrowserVisible ? "隐藏素材浏览区" : "显示素材浏览区") {
                     environment.isBrowserVisible.toggle()
                 }
+                .keyboardShortcut(.tab, modifiers: [])
                 Button("素材浏览区在左侧") {
                     environment.browserOnRight = false
                     environment.isBrowserVisible = true

@@ -113,6 +113,34 @@ enum SpriteGenerator {
         )
     }
 
+    /// C 键：按指定时间抽一帧做封面。只重建这一张，不走启发式，不用 mpv screenshot。
+    static func generateCover(url: URL, at seconds: Double) async throws -> CoverOutput {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(
+            width: SpriteSpec.coverSourceMax, height: SpriteSpec.coverSourceMax
+        )
+        let tolerance = CMTime(seconds: 0.04, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+
+        let time = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
+        let result = try await generator.image(at: time)
+        let actual = result.actualTime.seconds
+        guard let square = squareCrop(result.image),
+              let data = jpeg(square, quality: SpriteSpec.coverQuality)
+        else {
+            throw GenerateError.encodeFailed
+        }
+        return CoverOutput(
+            coverJPEG: data,
+            coverTime: actual.isFinite ? actual : seconds,
+            isFallback: false,
+            framesDecoded: 1
+        )
+    }
+
     /// 第二阶段：完整精灵图，供悬停扫过与进度条预览使用。
     static func generate(url: URL, info: MediaProbe.Info) async throws -> Output {
 

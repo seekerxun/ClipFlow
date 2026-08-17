@@ -21,6 +21,7 @@ struct MainView: View {
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls)
         }
+        .clipFlowInput()
     }
 
     private var browserPane: some View {
@@ -29,14 +30,17 @@ struct MainView: View {
     }
 
     private var playerPane: some View {
-        ZStack {
-            PlayerView(controller: env.playback)
-            if env.items.isEmpty {
-                Text("打开文件夹或把文件夹拖进来")
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            ZStack {
+                PlayerView(controller: env.playback)
+                if env.items.isEmpty {
+                    Text("打开文件夹或把文件夹拖进来")
+                        .foregroundStyle(.secondary)
+                }
             }
+            .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
+            TransportBar(controller: env.playback)
         }
-        .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var splitter: some View {
