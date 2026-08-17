@@ -41,3 +41,6 @@ Tools/out/
 # XcodeGen 生成的工程文件。project.yml 才是唯一事实来源，
 # 克隆后跑 `xcodegen generate` 生成即可。
 ClipFlow.xcodeproj/
+
+# 本地专用脚本。测试素材路径属于个人环境，不入库、不随开源发出去。
+*.local.sh
