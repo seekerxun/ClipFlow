@@ -26,7 +26,11 @@ struct MediaBrowserView: View {
                 MediaListView()
             }
         }
-        .background(.ultraThinMaterial)
+        .background {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .opacity(0.88)
+        }
         .overlay(alignment: env.browserOnRight ? .leading : .trailing) {
             Rectangle()
                 .fill(Color.white.opacity(0.10))

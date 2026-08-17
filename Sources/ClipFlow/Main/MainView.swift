@@ -63,7 +63,11 @@ struct MainView: View {
             TransportBar(controller: env.playback)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(.thinMaterial)
+                .background {
+                    Rectangle()
+                        .fill(.thinMaterial)
+                        .opacity(0.88)
+                }
         }
         .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
