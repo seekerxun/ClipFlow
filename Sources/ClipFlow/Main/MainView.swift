@@ -19,8 +19,21 @@ struct MainView: View {
             }
         }
         .background {
-            DockGlassBackground()
-                .ignoresSafeArea()
+            ZStack {
+                DockGlassBackground()
+                Color(red: 0.40, green: 0.30, blue: 0.92)
+                    .opacity(0.025)
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.40, green: 0.30, blue: 0.92).opacity(0.06),
+                        .clear,
+                    ],
+                    center: .bottomTrailing,
+                    startRadius: 0,
+                    endRadius: 1_100
+                )
+            }
+            .ignoresSafeArea()
         }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls)
@@ -161,7 +174,7 @@ struct MainView: View {
     }
 }
 
-/// 使用与 Dock 接近的系统级窗口毛玻璃：模糊并吸收桌面颜色，不额外染黑或染色。
+/// 使用与 Dock 接近的系统级窗口毛玻璃：模糊并吸收桌面颜色。
 private struct DockGlassBackground: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
