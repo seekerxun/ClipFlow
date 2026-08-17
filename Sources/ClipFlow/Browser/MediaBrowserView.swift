@@ -30,6 +30,7 @@ struct MediaBrowserView: View {
                       : "sidebar.left")
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help(env.browserOnRight ? "移到左侧" : "移到右侧")
             Button {
                 env.isBrowserVisible = false
@@ -37,6 +38,7 @@ struct MediaBrowserView: View {
                 Image(systemName: "xmark")
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .help("隐藏素材浏览区")
         }
         .padding(.horizontal, 10)

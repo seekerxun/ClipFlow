@@ -28,10 +28,11 @@ struct ClipFlowApp: App {
                 .keyboardShortcut("o", modifiers: .command)
             }
             CommandGroup(after: .sidebar) {
+                // Tab 由窗口收键处理（README 第 8 节），不在这里绑快捷键，
+                // 以免和系统切焦点或收键各触发一次。
                 Button(environment.isBrowserVisible ? "隐藏素材浏览区" : "显示素材浏览区") {
                     environment.isBrowserVisible.toggle()
                 }
-                .keyboardShortcut(.tab, modifiers: [])
                 Button("素材浏览区在左侧") {
                     environment.browserOnRight = false
                     environment.isBrowserVisible = true
