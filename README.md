@@ -124,10 +124,23 @@ ffmpeg -y -f lavfi -i "testsrc2=size=1280x720:rate=30" -f lavfi -i "sine=frequen
 正确做法是 IINA 那条路：**`--vo=libmpv` + `mpv_render_context`**，由我们自己持有 GL 上下文，mpv 只往我们给的 FBO 里画。几何、裁剪、层级就全部归 AppKit 管，`NSViewRepresentable` 包一层塞进 SwiftUI 即可。
 
 - 渲染 API 只有 **OpenGL** 和 **SW** 两种。SW 是 CPU 回读，太慢。所以 macOS 上只能用 OpenGL——虽然自 10.14 起标记废弃，但仍可用，IINA 也是这么做的。
-- 宿主用 `NSOpenGLView`，在 `prepareOpenGL()` 里建 render context，`reshape()` 里重画。窗口缩放由 AppKit 正常处理，V0 已验证。
+- 宿主用 `NSOpenGLView`，在 `prepareOpenGL()` 里建 render context，`reshape()` 里重画。窗口缩放时画面几何能正确跟随，V0 已验证；**播放中的缩放流畅度尚未达标**，见下节。
 - SwiftUI 浮层压在上面表现正常，无闪烁、无 z-order 问题，且能被 `screencapture` 正常抓到（mpv 自己的窗口抓不到）。
 
 **必须把渲染后端藏在一个 protocol 后面**，`PlaybackController` 只依赖抽象。将来 OpenGL 真被移除时，换成别的实现不会动到播放逻辑。
+
+### 窗口缩放与全屏性能（待优化）
+
+当前在播放视频时连续调整窗口大小或进入 / 退出全屏，会出现明显卡顿。现有渲染路径同时接收 mpv 新画面通知和窗口尺寸变化通知，并在主线程执行完整绘制；缩放动画期间可能短时间积累大量已经过时的重绘请求。这个判断需要通过实测确认，不能直接当成最终结论。
+
+优化按以下顺序推进：
+
+1. 分别用普通 1080p 和高码率 4K 视频记录主线程占用、重绘次数和单帧耗时，确认主要瓶颈。
+2. 合并重复的画面更新，只绘制最新一帧，不让过时请求在主线程排队。
+3. 窗口正在连续缩放时以操作响应为先，必要时降低画面刷新频率；音频必须保持连续。
+4. 只有前三步仍不足时，才调整为跟随屏幕刷新节奏或改动渲染线程，不提前扩大改动范围。
+
+完成标准：播放中连续拖动窗口边缘、进入和退出全屏时，窗口操作和控制条不明显卡住，声音不中断；系统全屏动画期间允许少量视频掉帧，不要求逐帧无损。
 
 ### 致命坑：命令必须用 `mpv_command_async`
 
@@ -235,6 +248,10 @@ V0 实测 `screenshot` 命令必挂。**一律用 `mpv_command_async`**，别留
 - 全屏
 - 进度条 hover 显示该位置的缩略图预览（读精灵图，不解码）
 
+### 窗口生命周期
+
+每扇窗口独立持有自己的播放实例。使用 `Cmd+W` 关闭窗口时，必须停止并释放**该窗口**的 mpv 实例与渲染上下文，其他窗口不受影响；应用本身可以继续驻留。重新打开窗口后，不得再听到已关闭窗口的视频声音。
+
 ---
 
 ## 6. 缩略图与精灵图流水线
@@ -288,7 +305,17 @@ generator.requestedTimeToleranceAfter  = tolerance
 
 > **同理，ffmpeg 的 `-skip_frame nokey` 也不能无条件用。** Jellyfin 报告的约 110 倍加速是真的，但他们的内容是电影剧集：关键帧密集、时长以小时计。换成十几秒、只有一个关键帧的短片，出来的就是一堆重复帧。回退路径要按素材的关键帧密度决定用不用。
 
-**回退路径：ffmpeg**，用于 AVFoundation 打不开的格式（MKV / WebM / FLV / WMV / TS 等）。一个视频只起一个进程：
+播放与缩略图是两条独立路径：播放使用 libmpv，缩略图主路径使用 AVFoundation。因此 MKV、AVI、RM 等文件即使能正常播放，也可能因为 AVFoundation 无法读取其容器或内部编码而没有缩略图；这不代表文件损坏，也不需要修改播放内核。
+
+**回退路径：ffprobe + ffmpeg**，用于 AVFoundation 打不开的格式或编码（常见于 MKV / AVI / RM / WebM / FLV / WMV / TS 等）：
+
+- 元数据探测失败时，用 ffprobe 补时长与应用旋转后的显示尺寸，否则流水线会在抽帧之前就停止。
+- 封面和精灵图都要有 ffmpeg 回退，不能只补列表中的静态封面而让悬停扫过、进度条预览继续失效。
+- 单次生成任务只启动一个进程，不得为 24 帧逐帧启动 ffmpeg。
+- 两条路径产出的封面、精灵图规格必须一致，下游继续共用同一套读取逻辑。
+- ffprobe / ffmpeg 都要服从现有超时、取消和并发上限；坏文件仍然记录失败，避免反复重试。
+
+精灵图示意命令：
 
 ```bash
 ffmpeg -i in.mkv -vf "fps=<每秒帧数>,scale=144:-1,tile=6x4" -frames:v 1 sprite.jpg
@@ -297,6 +324,8 @@ ffmpeg -i in.mkv -vf "fps=<每秒帧数>,scale=144:-1,tile=6x4" -frames:v 1 spri
 因为帧间隔不保证正好等于请求值，**索引中必须存下 24 帧各自的实际时间戳**，悬停位置到帧的映射才准确。这个字段做进度条预览也要用。
 
 两条路径产出的精灵图格式完全一致，下游逻辑共用一套。
+
+开发阶段不处理历史失败记录迁移。回退功能完成后，若之前打开过的素材仍然无图，直接清空 ClipFlow 的索引数据和缩略图缓存后重新扫描；只清图片缓存不够，因为失败状态保存在索引中。正式分发前再根据实际需要决定是否加入自动迁移。
 
 **不要用 libmpv 生成缩略图。** 500 个文件的目录首次扫描会慢到难以接受。
 
@@ -470,7 +499,7 @@ ClipFlow/
 ├── Media/
 │   ├── MediaItem.swift
 │   ├── MediaScanner.swift           # 目录扫描 + 过滤 + 递归
-│   └── MediaProbe.swift             # 时长 / 分辨率 / 编码探测（带超时）
+│   └── MediaProbe.swift             # 时长 / 分辨率探测（AVFoundation + ffprobe 回退，带超时）
 │
 ├── Thumbnail/
 │   ├── SpriteGenerator.swift        # 两阶段抽帧：generateCover / generate
