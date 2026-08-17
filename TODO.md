@@ -14,13 +14,13 @@
 | 阶段 | 状态 |
 |---|---|
 | **V0** 风险验证 | ✅ 完成。`--wid` 实测不可行，已改走 render API |
-| **V1** 可用 | 🔵 进行中，第 1–6 块代码已齐；完成标准待真实目录手测 |
+| **V1** 可用 | 🔵 进行中。第 1–6 块代码已齐、可人手测；完成标准待 `/Users/seekerxun/Movies/` 手测 |
 | └ 1. 扫描与索引 | ✅ 完成 |
 | └ 2. 精灵图流水线 | ✅ 完成（ffmpeg 回退路径暂缓） |
 | └ 3. 封面帧选取 | ✅ 完成（`C` 键已接；起始百分比默认 35%，尚无设置界面） |
 | └ 4. 调度 | ✅ 完成（并发上限、两阶段拆分、可见优先级调度） |
 | └ **5. 播放** | ✅ 完成（画面能嵌进 SwiftUI；F / Esc / 中键全屏已接） |
-| └ **6. 界面与输入** | 🔵 **后半已接线**（快捷键 / 控制条 / C 键 / 循环 / 全屏）；完成标准未手测 |
+| └ **6. 界面与输入** | ✅ 完成（快捷键 / 控制条 / C 键 / 循环 / 全屏已接）；完成标准未手测 |
 | **V1.1 / V2 / 暂缓** | ⬜ 未开始 |
 
 已跑通并可复现的部分：
@@ -32,13 +32,13 @@ xcodebuild -project ClipFlow.xcodeproj -scheme ClipFlow -configuration Debug -de
 CLIPFLOW_BENCH="/path/to/videos" .build/dd/Build/Products/Debug/ClipFlow.app/Contents/MacOS/ClipFlow
 ```
 
-V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程，**播放部分要从那里搬运**——渲染上下文的建立、更新回调、重绘都已经验证过。
+V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程。播放已从 spike 搬进正式工程。
 
 ### 下一步要做什么
 
-第 6 块后半已接线：快捷键全集、播放控制条、`C` 键封面、循环 / 自动下一个、全屏。判据仍是「能用键盘从头到尾扫完一个真实目录」，见 V1 完成标准；未实测前不要勾。
+代码已接到可人手测。下一步用 `/Users/seekerxun/Movies/` 对照 V1 完成标准手测（首屏 < 1s、切换 < 150ms、键盘扫完真实目录等）；未实测前不要勾完成标准。
 
-起始百分比已接 `CoverPicker` 参数和 UserDefaults（默认 35%），设置界面还没有。网格模式、进度条 hover 预览仍是 V1.1。
+起始百分比已接参数和 UserDefaults（默认 35%），设置界面还没有。网格模式、进度条 hover 预览仍是 V1.1。
 
 ---
 
@@ -55,7 +55,7 @@ V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程，**播放�
 - [x] 验证播放 / 暂停 / seek 三个基本操作
 - [x] 验证 SwiftUI 浮层的 z-order / 闪烁 —— 正常
 - [x] 验证窗口缩放时几何跟随 —— 正常
-- [ ] 关闭 App Sandbox（spike 走 SPM 可执行文件，本就没沙盒；建正式 Xcode 工程时再落实）
+- [x] 关闭 App Sandbox（正式工程 `ENABLE_APP_SANDBOX: NO`）
 
 **完成标准：** SwiftUI 窗口里能播 MKV，能暂停，能拖动 seek，浮层行为已知。✅
 
@@ -158,8 +158,8 @@ V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程，**播放�
 - [x] `TransportBar` 播放控制条
 - [x] `KeyBindings` 全套快捷键（见 README 第 8 节）
 - [x] 选中即播模型：`Q`/`E` 移动选中项即切换视频
-- [ ] 建正式 Xcode 工程，关闭 App Sandbox
-- [ ] 应用图标：`swift Tools/make-icon.swift icon.png Tools/out` 生成 `.icns` 后放进 bundle
+- [x] 建正式 Xcode 工程，关闭 App Sandbox
+- [x] 应用图标：已放入 Asset Catalog（`AppIcon`）
 
 ### V1 完成标准
 
