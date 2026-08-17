@@ -9,6 +9,23 @@ import Foundation
 enum Bench {
 
     static func runIfRequested() -> Bool {
+        if ProcessInfo.processInfo.environment["CLIPFLOW_BENCH"] != nil {
+            return runBench()
+        }
+        if let root = ProcessInfo.processInfo.environment["CLIPFLOW_QUEUE_CHECK"] {
+            setvbuf(stdout, nil, _IONBF, 0)
+            // ThumbnailQueue 在主线程；不能在主线程上 semaphore.wait，否则会自己卡死。
+            Task { @MainActor in
+                await runQueueCheck(root: root)
+                exit(0)
+            }
+            RunLoop.main.run()
+            return true
+        }
+        return false
+    }
+
+    private static func runBench() -> Bool {
         guard let root = ProcessInfo.processInfo.environment["CLIPFLOW_BENCH"] else {
             return false
         }
@@ -109,5 +126,88 @@ enum Bench {
             }
         }
         print("\n=== 结束 ===")
+    }
+
+    /// 扫描真实目录并验证可见队列不会把全部文件一次性入队。
+    /// 不抽帧、不改用户素材。
+    @MainActor
+    private static func runQueueCheck(root: String) async {
+        print("=== ClipFlow 可见队列检查 ===\n")
+
+        let benchIndex = FileManager.default.temporaryDirectory
+            .appending(path: "clipflow-queue-check-index.json")
+        try? FileManager.default.removeItem(at: benchIndex)
+        let index = MediaIndex(fileURL: benchIndex)
+        await index.load()
+
+        let scanStart = Date()
+        let result = MediaScanner.scan(root: URL(filePath: root))
+        let scanElapsed = Date().timeIntervalSince(scanStart)
+        print(String(
+            format: "扫描：%d 个视频，跳过 %d 个非视频文件，耗时 %.3fs",
+            result.items.count, result.skippedCount, scanElapsed
+        ))
+        guard !result.items.isEmpty else {
+            print("没有找到视频，结束。")
+            return
+        }
+
+        let queue = ThumbnailQueue(index: index)
+        queue.enableProcessing = false
+        queue.reset(items: result.items)
+
+        let visibleCount = min(12, result.items.count)
+        for item in result.items.prefix(visibleCount) {
+            queue.appear(id: item.id)
+        }
+
+        let pending = queue.pendingCount
+        print(String(
+            format: "可见窗口入队：pending=%d visible=%d nearby=%d idle=%d 目录总数=%d",
+            pending, queue.visibleJobCount, queue.nearbyJobCount, queue.idleJobCount,
+            result.items.count
+        ))
+        print("submitted=\(queue.submittedCount) active=\(queue.activeCount) 上限=\(IndexingPipeline.maxConcurrent)")
+
+        var ok = true
+        if result.items.count > visibleCount * 3 {
+            if pending >= result.items.count {
+                print("❌ 打开时把全部文件入队了")
+                ok = false
+            } else if queue.idleJobCount > 0 {
+                print("❌ 未开空闲补齐却有 idle 任务")
+                ok = false
+            } else {
+                print("✅ 打开时未全量入队")
+            }
+        } else {
+            print("（目录较小，跳过全量入队断言）")
+        }
+
+        if queue.submittedCount != 0 || queue.activeCount != 0 {
+            print("❌ 检查模式不应真正提交抽帧")
+            ok = false
+        }
+
+        queue.armIdleFill()
+        print(String(
+            format: "空闲补齐后：pending=%d idle=%d submitted=%d",
+            queue.pendingCount, queue.idleJobCount, queue.submittedCount
+        ))
+        if queue.submittedCount != 0 {
+            print("❌ 空闲补齐不应在检查模式提交抽帧")
+            ok = false
+        } else if result.items.count > visibleCount * 3, queue.idleJobCount == 0 {
+            print("❌ 空闲补齐后没有剩余项")
+            ok = false
+        } else {
+            print("✅ 空闲补齐只入队、未开 500 个 Task")
+        }
+
+        queue.reset(items: [])
+        print(ok ? "\n=== 通过 ===" : "\n=== 未通过 ===")
+        if !ok {
+            exit(1)
+        }
     }
 }

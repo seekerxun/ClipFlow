@@ -21,7 +21,25 @@ struct ClipFlowApp: App {
         }
         .defaultSize(width: 1280, height: 800)
         .commands {
-            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .newItem) {
+                Button("打开文件夹…") {
+                    environment.promptOpenFolder()
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
+            CommandGroup(after: .sidebar) {
+                Button(environment.isBrowserVisible ? "隐藏素材浏览区" : "显示素材浏览区") {
+                    environment.isBrowserVisible.toggle()
+                }
+                Button("素材浏览区在左侧") {
+                    environment.browserOnRight = false
+                    environment.isBrowserVisible = true
+                }
+                Button("素材浏览区在右侧") {
+                    environment.browserOnRight = true
+                    environment.isBrowserVisible = true
+                }
+            }
         }
     }
 }

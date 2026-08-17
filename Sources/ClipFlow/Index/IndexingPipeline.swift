@@ -79,19 +79,22 @@ enum IndexingPipeline {
         return progress
     }
 
-    private enum Outcome: Sendable {
+    enum Outcome: Sendable {
         case succeeded
         case failed
         case skipped
     }
 
-    private static func processOne(
+    /// 处理单条。界面的可见队列走这条，不要把整目录丢进 `process`。
+    @discardableResult
+    static func processOne(
         item: MediaItem,
         index: MediaIndex,
         stage: Stage,
-        startFraction: Double
+        startFraction: Double = CoverPicker.defaultStartFraction
     ) async -> Outcome {
 
+        try? ThumbnailStore.prepareDirectories()
         guard await index.needsWork(for: item, stage: stage) else { return .skipped }
 
         var record = await index.record(for: item.key) ?? IndexRecord(key: item.key)
