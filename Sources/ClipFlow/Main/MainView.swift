@@ -18,7 +18,29 @@ struct MainView: View {
                 browserPane
             }
         }
-        .background(Color.clear)
+        .background {
+            ZStack {
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.38, green: 0.24, blue: 0.96).opacity(0.16),
+                        .clear,
+                    ],
+                    center: .bottomTrailing,
+                    startRadius: 0,
+                    endRadius: 620
+                )
+                RadialGradient(
+                    colors: [
+                        Color(red: 0.10, green: 0.58, blue: 0.98).opacity(0.08),
+                        .clear,
+                    ],
+                    center: .bottomLeading,
+                    startRadius: 0,
+                    endRadius: 720
+                )
+            }
+            .ignoresSafeArea()
+        }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls)
         }
