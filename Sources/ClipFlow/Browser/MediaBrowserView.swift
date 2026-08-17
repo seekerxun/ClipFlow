@@ -29,7 +29,7 @@ struct MediaBrowserView: View {
         .background {
             Rectangle()
                 .fill(.ultraThinMaterial)
-                .opacity(0.88)
+                .opacity(0.76)
         }
         .overlay(alignment: env.browserOnRight ? .leading : .trailing) {
             Rectangle()

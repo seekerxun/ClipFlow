@@ -18,7 +18,7 @@ struct MainView: View {
                 browserPane
             }
         }
-        .background(Color(nsColor: NSColor(calibratedWhite: 0.035, alpha: 1)))
+        .background(Color.clear)
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls)
         }
@@ -66,7 +66,7 @@ struct MainView: View {
                 .background {
                     Rectangle()
                         .fill(.thinMaterial)
-                        .opacity(0.88)
+                        .opacity(0.76)
                 }
         }
         .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)

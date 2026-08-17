@@ -105,7 +105,7 @@ struct TransportBar: View {
         .background {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(.ultraThinMaterial)
-                .opacity(0.88)
+                .opacity(0.72)
         }
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)

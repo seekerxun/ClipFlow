@@ -85,7 +85,8 @@ private struct WindowTitleSync: NSViewRepresentable {
             window.representedURL = fileURL
             window.appearance = NSAppearance(named: .darkAqua)
             window.titlebarAppearsTransparent = true
-            window.backgroundColor = NSColor(calibratedWhite: 0.035, alpha: 1)
+            window.isOpaque = false
+            window.backgroundColor = NSColor(calibratedWhite: 0.035, alpha: 0.72)
             window.titlebarSeparatorStyle = .line
         }
     }
