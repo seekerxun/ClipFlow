@@ -52,6 +52,49 @@ enum SpriteGenerator {
         let framesDecoded: Int
     }
 
+    /// 保持 AVFoundation 为主路径；只有真实解码失败才启动 ffmpeg。
+    static func generateCoverWithFallback(
+        url: URL,
+        info: MediaProbe.Info,
+        startFraction: Double = CoverPicker.defaultStartFraction
+    ) async throws -> CoverOutput {
+        do {
+            return try await generateCover(url: url, info: info, startFraction: startFraction)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            return try await FFmpegSpriteGenerator.generateCover(
+                url: url, info: info, startFraction: startFraction
+            )
+        }
+    }
+
+    static func generateCoverWithFallback(url: URL, at seconds: Double) async throws -> CoverOutput {
+        do {
+            return try await generateCover(url: url, at: seconds)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            return try await FFmpegSpriteGenerator.generateCover(url: url, at: seconds)
+        }
+    }
+
+    static func generateWithFallback(
+        url: URL,
+        info: MediaProbe.Info
+    ) async throws -> Output {
+        do {
+            return try await generate(url: url, info: info)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            return try await FFmpegSpriteGenerator.generate(url: url, info: info)
+        }
+    }
+
     /// 第一阶段：只出封面。
     ///
     /// 按偏好顺序逐个试候选位置，第一个不是近乎纯色的就用它，因此多数视频
@@ -82,6 +125,7 @@ enum SpriteGenerator {
         var decoded = 0
 
         for fraction in fractions {
+            try Task.checkCancellation()
             let seconds = info.duration * fraction
             let time = CMTime(seconds: seconds, preferredTimescale: 600)
             guard let image = try? await generator.image(at: time).image else { continue }
@@ -127,6 +171,7 @@ enum SpriteGenerator {
 
         let time = CMTime(seconds: max(0, seconds), preferredTimescale: 600)
         let result = try await generator.image(at: time)
+        try Task.checkCancellation()
         let actual = result.actualTime.seconds
         guard let square = squareCrop(result.image),
               let data = jpeg(square, quality: SpriteSpec.coverQuality)
@@ -178,6 +223,7 @@ enum SpriteGenerator {
 
         var cursor = 0
         for await result in generator.images(for: times) {
+            try Task.checkCancellation()
             guard cursor < frames.count else { break }
             if let image = try? result.image {
                 frames[cursor] = image
@@ -188,7 +234,12 @@ enum SpriteGenerator {
             cursor += 1
         }
 
-        guard frames.contains(where: { $0 != nil }) else { throw GenerateError.noFrames }
+        try Task.checkCancellation()
+        // 部分成功不能当作完成，否则缺失位置会被背景色填成黑格，并且不会进入
+        // ffmpeg 回退。24 个位置必须全部拿到图像才接受 AVFoundation 结果。
+        guard hasCompleteFrames(frames, expectedCount: SpriteSpec.frameCount) else {
+            throw GenerateError.noFrames
+        }
 
         let (spriteData, tileWidth, tileHeight) = try composeSprite(frames: frames)
         return Output(
@@ -197,6 +248,10 @@ enum SpriteGenerator {
             tileWidth: tileWidth,
             tileHeight: tileHeight
         )
+    }
+
+    static func hasCompleteFrames<T>(_ frames: [T?], expectedCount: Int) -> Bool {
+        frames.count == expectedCount && frames.allSatisfy { $0 != nil }
     }
 
     // MARK: - 取样点

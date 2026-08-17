@@ -32,6 +32,7 @@ final class ThumbnailQueue {
     @ObservationIgnored private var jobs: [String: Job] = [:]
     @ObservationIgnored private var visibleIDs: Set<String> = []
     @ObservationIgnored private var running: Set<String> = []
+    @ObservationIgnored private var runningTasks: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var failedIDs: Set<String> = []
     @ObservationIgnored private var doneCover: Set<String> = []
     @ObservationIgnored private var doneSprite: Set<String> = []
@@ -49,6 +50,8 @@ final class ThumbnailQueue {
 
     func reset(items: [MediaItem], records: [String: IndexRecord] = [:]) {
         generation += 1
+        for task in runningTasks.values { task.cancel() }
+        runningTasks.removeAll()
         jobs.removeAll()
         visibleIDs.removeAll()
         running.removeAll()
@@ -73,6 +76,8 @@ final class ThumbnailQueue {
         let oldIDs = Set(orderedIDs)
 
         for id in oldIDs where !newIDs.contains(id) {
+            runningTasks[id]?.cancel()
+            runningTasks.removeValue(forKey: id)
             jobs.removeValue(forKey: id)
             visibleIDs.remove(id)
             failedIDs.remove(id)
@@ -193,7 +198,7 @@ final class ThumbnailQueue {
             let fraction = startFraction
             let gen = generation
             let index = self.index
-            Task.detached { [weak self] in
+            let task = Task.detached { [weak self] in
                 let outcome = await IndexingPipeline.processOne(
                     item: item, index: index, stage: stage, startFraction: fraction
                 )
@@ -203,6 +208,7 @@ final class ThumbnailQueue {
                     digest: item.id, stage: stage, outcome: outcome, record: record, generation: gen
                 )
             }
+            runningTasks[pick.digest] = task
         }
         if running.isEmpty, jobs.values.allSatisfy({ !$0.wantsCover && !$0.wantsSprite }) {
             Task { try? await index.save() }
@@ -245,6 +251,7 @@ final class ThumbnailQueue {
     ) {
         guard generation == self.generation else { return }
         running.remove(digest)
+        runningTasks.removeValue(forKey: digest)
         activeCount = running.count
         if let record {
             onRecord?(record)
@@ -252,6 +259,9 @@ final class ThumbnailQueue {
         switch outcome {
         case .failed:
             failedIDs.insert(digest)
+            jobs.removeValue(forKey: digest)
+        case .cancelled:
+            // 取消不是素材失败。先移出本轮队列，之后再次进入可见窗口时可重新入队。
             jobs.removeValue(forKey: digest)
         case .succeeded, .skipped:
             if stage == .cover { doneCover.insert(digest) }

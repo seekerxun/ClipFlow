@@ -47,6 +47,9 @@ private struct WindowRoot: View {
                     title: environment.selectedItem?.name ?? "片巡",
                     fileURL: environment.selectedItem?.url
                 )
+                WindowCloseObserver {
+                    closeWindow()
+                }
             }
             .task {
                 SessionHub.shared.register(environment)
@@ -62,8 +65,98 @@ private struct WindowRoot: View {
                 }
             }
             .onDisappear {
-                SessionHub.shared.unregister(environment)
+                // 关闭通知是主路径；视图移除时再调用一次只作兜底。
+                closeWindow()
             }
+    }
+
+    /// 只清理本窗口持有的播放实例。`PlaybackController.shutdown()` 可重复调用，
+    /// 因而关闭通知和 SwiftUI 视图移除的先后顺序不会影响其他窗口。
+    private func closeWindow() {
+        environment.playback.shutdown()
+        SessionHub.shared.unregister(environment)
+    }
+}
+
+/// 监听自己所在的那一扇窗口，不能用应用级关闭通知，否则多窗口会互相误伤。
+private struct WindowCloseObserver: NSViewRepresentable {
+    let onClose: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onClose: onClose)
+    }
+
+    func makeNSView(context: Context) -> WindowObserverView {
+        let view = WindowObserverView()
+        view.onWindowChanged = { [weak coordinator = context.coordinator] window in
+            coordinator?.observe(window: window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: WindowObserverView, context: Context) {
+        context.coordinator.onClose = onClose
+        context.coordinator.observe(window: nsView.window)
+    }
+
+    static func dismantleNSView(_ nsView: WindowObserverView, coordinator: Coordinator) {
+        coordinator.stopObserving()
+    }
+
+    final class Coordinator {
+        var onClose: () -> Void
+        private weak var window: NSWindow?
+        private var closeObserver: NSObjectProtocol?
+        private var didClose = false
+
+        init(onClose: @escaping () -> Void) {
+            self.onClose = onClose
+        }
+
+        deinit {
+            stopObserving()
+        }
+
+        func observe(window: NSWindow?) {
+            if let current = self.window, let window, current === window { return }
+            if self.window == nil, window == nil { return }
+
+            stopObserving()
+            self.window = window
+            guard let window else { return }
+
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.handleWindowClose()
+            }
+        }
+
+        func stopObserving() {
+            if let closeObserver {
+                NotificationCenter.default.removeObserver(closeObserver)
+            }
+            closeObserver = nil
+            window = nil
+        }
+
+        private func handleWindowClose() {
+            guard !didClose else { return }
+            didClose = true
+            onClose()
+            stopObserving()
+        }
+    }
+}
+
+private final class WindowObserverView: NSView {
+    var onWindowChanged: ((NSWindow?) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChanged?(window)
     }
 }
 

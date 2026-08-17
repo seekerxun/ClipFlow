@@ -16,7 +16,16 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
 
     private var mpvHandle: OpaquePointer?
     private var renderContext: OpaquePointer?
+    private var updateCoalescer: RenderUpdateCoalescer?
+    private var updateCallbackContext: UnsafeMutableRawPointer?
     private var didNotifyReady = false
+    private var activeInteractions: Set<Interaction> = []
+    private var windowObservers: [NSObjectProtocol] = []
+
+    private enum Interaction: Hashable {
+        case liveResize
+        case fullscreenTransition
+    }
 
     init() {
         let attributes: [NSOpenGLPixelFormatAttribute] = [
@@ -53,11 +62,20 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
     }
 
     func detach() {
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
+        windowObservers.removeAll()
+        activeInteractions.removeAll()
+        updateCoalescer?.invalidate()
         if let renderContext {
             mpv_render_context_set_update_callback(renderContext, nil, nil)
             mpv_render_context_free(renderContext)
             self.renderContext = nil
         }
+        if let updateCallbackContext {
+            Unmanaged<RenderUpdateCoalescer>.fromOpaque(updateCallbackContext).release()
+            self.updateCallbackContext = nil
+        }
+        updateCoalescer = nil
         mpvHandle = nil
         didNotifyReady = false
         onRenderContextReady = nil
@@ -108,12 +126,20 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
         }
         renderContext = context
 
-        // mpv 从自己的线程通知有新帧，必须转回主线程再画
+        let coalescer = RenderUpdateCoalescer { [weak self] force in
+            self?.renderLatestFrame(force: force)
+        }
+        coalescer.setInteractive(!activeInteractions.isEmpty)
+        updateCoalescer = coalescer
+        // C 回调只接触独立合并器，不跨线程解引用 NSView。显式 retain 到 render
+        // context 释放之后，避免关闭窗口时尾随回调访问已经销毁的视图。
+        let callbackContext = Unmanaged.passRetained(coalescer).toOpaque()
+        updateCallbackContext = callbackContext
         mpv_render_context_set_update_callback(context, { ctx in
             guard let ctx else { return }
-            let view = Unmanaged<MPVGLBackend>.fromOpaque(ctx).takeUnretainedValue()
-            DispatchQueue.main.async { view.renderFrame() }
-        }, Unmanaged.passUnretained(self).toOpaque())
+            let coalescer = Unmanaged<RenderUpdateCoalescer>.fromOpaque(ctx).takeUnretainedValue()
+            coalescer.request()
+        }, callbackContext)
 
         guard !didNotifyReady else { return }
         didNotifyReady = true
@@ -123,23 +149,38 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
     // MARK: - 绘制
 
     override func draw(_ dirtyRect: NSRect) {
-        renderFrame(force: true)
+        updateCoalescer?.request(force: true)
     }
 
     override func reshape() {
         super.reshape()
-        renderFrame(force: true)
+        updateCoalescer?.request(force: true)
     }
 
-    func renderFrame(force: Bool = false) {
+    override func viewWillStartLiveResize() {
+        super.viewWillStartLiveResize()
+        setInteraction(.liveResize, active: true)
+    }
+
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        setInteraction(.liveResize, active: false)
+        updateCoalescer?.request(force: true)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        observeFullscreenTransition(in: window)
+    }
+
+    private func renderLatestFrame(force: Bool) {
         guard let renderContext, let glContext = openGLContext,
               let cgl = glContext.cglContextObj
         else { return }
 
-        if !force {
-            let flags = mpv_render_context_update(renderContext)
-            guard flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0 else { return }
-        }
+        // 即使因尺寸变化而强制重画也消费 update 标志，避免同一更新随后再画一次。
+        let flags = mpv_render_context_update(renderContext)
+        guard force || flags & UInt64(MPV_RENDER_UPDATE_FRAME.rawValue) != 0 else { return }
 
         glContext.makeCurrentContext()
         CGLLockContext(cgl)
@@ -169,5 +210,38 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
         }
 
         glContext.flushBuffer()
+    }
+
+    private func observeFullscreenTransition(in window: NSWindow?) {
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
+        windowObservers.removeAll()
+        activeInteractions.remove(.fullscreenTransition)
+        updateCoalescer?.setInteractive(!activeInteractions.isEmpty)
+        guard let window else { return }
+
+        let center = NotificationCenter.default
+        for name in [NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification] {
+            windowObservers.append(center.addObserver(forName: name, object: window, queue: .main) {
+                [weak self] _ in
+                self?.setInteraction(.fullscreenTransition, active: true)
+            })
+        }
+        for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+            windowObservers.append(center.addObserver(forName: name, object: window, queue: .main) {
+                [weak self] _ in
+                guard let self else { return }
+                self.setInteraction(.fullscreenTransition, active: false)
+                self.updateCoalescer?.request(force: true)
+            })
+        }
+    }
+
+    private func setInteraction(_ interaction: Interaction, active: Bool) {
+        if active {
+            activeInteractions.insert(interaction)
+        } else {
+            activeInteractions.remove(interaction)
+        }
+        updateCoalescer?.setInteractive(!activeInteractions.isEmpty)
     }
 }

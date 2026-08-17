@@ -413,7 +413,7 @@ final class AppEnvironment {
 
     // MARK: - B 键封面
 
-    /// 把当前播放帧写成封面。走 AVFoundation，不用 mpv screenshot。
+    /// 把当前播放帧写成封面。优先走 AVFoundation，不支持时回退 ffmpeg。
     func captureCoverFromCurrentFrame() {
         guard let item = selectedItem else { return }
         var seconds = playback.currentPlaybackTime() ?? playback.currentTime
@@ -426,7 +426,9 @@ final class AppEnvironment {
 
     private func applyManualCover(item: MediaItem, seconds: Double) async {
         do {
-            let output = try await SpriteGenerator.generateCover(url: item.url, at: seconds)
+            let output = try await SpriteGenerator.generateCoverWithFallback(
+                url: item.url, at: seconds
+            )
             try ThumbnailStore.writeCover(output.coverJPEG, digest: item.key.digest)
             var record = await index.record(for: item.key) ?? IndexRecord(key: item.key)
             if record.duration == nil, playback.duration > 0 {

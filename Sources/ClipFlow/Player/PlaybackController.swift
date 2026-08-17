@@ -69,6 +69,7 @@ final class PlaybackController {
     @ObservationIgnored private var isRenderReady = false
     @ObservationIgnored private var fullscreenObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var abSeekPending = false
+    @ObservationIgnored private var didShutdown = false
 
     init() {
         let defaults = UserDefaults.standard
@@ -104,9 +105,7 @@ final class PlaybackController {
     }
 
     deinit {
-        fullscreenObservers.forEach { NotificationCenter.default.removeObserver($0) }
-        backend?.detach()
-        mpv.shutdown()
+        shutdown()
     }
 
     /// 由 `MPVVideoView` 在创建宿主视图时调用。只接收抽象后端。
@@ -125,10 +124,18 @@ final class PlaybackController {
     }
 
     func shutdown() {
+        guard !didShutdown else { return }
+        didShutdown = true
+
+        pendingURL = nil
+        onPlaybackEnded = nil
+        // render context 必须先于 libmpv 句柄销毁；否则后端仍可能访问已释放句柄。
         backend?.detach()
         backend = nil
         isRenderReady = false
         mpv.shutdown()
+        fullscreenObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        fullscreenObservers.removeAll()
     }
 
     // MARK: - 加载 / 播放

@@ -67,7 +67,7 @@ enum IndexingPipeline {
                 switch outcome {
                 case .succeeded: progress.succeeded += 1
                 case .failed: progress.failed += 1
-                case .skipped: progress.skipped += 1
+                case .skipped, .cancelled: progress.skipped += 1
                 }
                 onProgress?(progress)
                 try? await index.saveIfNeeded()
@@ -83,6 +83,8 @@ enum IndexingPipeline {
         case succeeded
         case failed
         case skipped
+        /// 用户滚离、切换目录或关闭窗口导致的取消，不属于素材失败，绝不落库。
+        case cancelled
     }
 
     /// 处理单条。界面的可见队列走这条，不要把整目录丢进 `process`。
@@ -94,18 +96,21 @@ enum IndexingPipeline {
         startFraction: Double = CoverPicker.defaultStartFraction
     ) async -> Outcome {
 
+        if Task.isCancelled { return .cancelled }
         try? ThumbnailStore.prepareDirectories()
         guard await index.needsWork(for: item, stage: stage) else { return .skipped }
 
         var record = await index.record(for: item.key) ?? IndexRecord(key: item.key)
 
         do {
+            try Task.checkCancellation()
             // 元数据可能上一阶段已经拿到过，没有才探
             let info: MediaProbe.Info
             if let duration = record.duration, let w = record.width, let h = record.height {
                 info = MediaProbe.Info(duration: duration, width: w, height: h)
             } else {
                 info = try await MediaProbe.probe(item.url)
+                try Task.checkCancellation()
                 record.duration = info.duration
                 record.width = info.width
                 record.height = info.height
@@ -114,13 +119,15 @@ enum IndexingPipeline {
             switch stage {
             case .cover:
                 if let manual = record.manualCoverTime {
-                    let cover = try await SpriteGenerator.generateCover(url: item.url, at: manual)
+                    let cover = try await SpriteGenerator.generateCoverWithFallback(
+                        url: item.url, at: manual
+                    )
                     try ThumbnailStore.writeCover(cover.coverJPEG, digest: item.key.digest)
                     record.coverTime = cover.coverTime
                     record.coverIsFallback = false
                     record.manualCoverTime = manual
                 } else {
-                    let cover = try await SpriteGenerator.generateCover(
+                    let cover = try await SpriteGenerator.generateCoverWithFallback(
                         url: item.url, info: info, startFraction: startFraction
                     )
                     if let latest = await index.record(for: item.key),
@@ -134,7 +141,9 @@ enum IndexingPipeline {
                 }
 
             case .sprite:
-                let sprite = try await SpriteGenerator.generate(url: item.url, info: info)
+                let sprite = try await SpriteGenerator.generateWithFallback(
+                    url: item.url, info: info
+                )
                 try ThumbnailStore.writeSprite(sprite.spriteJPEG, digest: item.key.digest)
                 record.spriteTimestamps = sprite.timestamps
                 record.tileWidth = sprite.tileWidth
@@ -145,6 +154,8 @@ enum IndexingPipeline {
             await index.upsert(record)
             return .succeeded
 
+        } catch is CancellationError {
+            return .cancelled
         } catch {
             record.failure = FailureRecord(
                 reason: String(describing: error), at: Date()
