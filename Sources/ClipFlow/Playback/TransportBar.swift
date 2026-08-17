@@ -107,7 +107,6 @@ struct TransportBar: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
         }
-        .shadow(color: .black.opacity(0.30), radius: 22, y: 10)
         .transaction { $0.animation = nil }
     }
 
