@@ -16,7 +16,7 @@ struct ClipFlowApp: App {
     @NSApplicationDelegateAdaptor(ClipFlowAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        WindowGroup("片巡", id: "main") {
+        WindowGroup(id: "main") {
             WindowRoot()
         }
         .defaultSize(width: 1280, height: 800)
@@ -41,6 +41,12 @@ private struct WindowRoot: View {
         MainView()
             .environment(environment)
             .focusedSceneValue(\.clipFlowEnvironment, environment)
+            .background {
+                WindowTitleSync(
+                    title: environment.selectedItem?.name ?? "片巡",
+                    fileURL: environment.selectedItem?.url
+                )
+            }
             .task {
                 SessionHub.shared.register(environment)
                 SessionHub.shared.openNewWindow = { urls in
@@ -57,6 +63,26 @@ private struct WindowRoot: View {
             .onDisappear {
                 SessionHub.shared.unregister(environment)
             }
+    }
+}
+
+/// 窗口标题用正在播的文件名，Dock 右键才能分清多扇窗口。
+private struct WindowTitleSync: NSViewRepresentable {
+    var title: String
+    var fileURL: URL?
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        view.isHidden = true
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            guard let window = nsView.window else { return }
+            window.title = title
+            window.representedURL = fileURL
+        }
     }
 }
 

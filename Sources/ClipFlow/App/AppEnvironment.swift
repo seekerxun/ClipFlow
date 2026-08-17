@@ -169,9 +169,7 @@ final class AppEnvironment {
     }
 
     func applyWindowChrome() {
-        guard let window = NSApp.keyWindow else { return }
-        window.representedURL = nil
-        window.title = "ClipFlow"
+        // 窗口标题由各窗口按当前播放文件更新，这里不再写死 ClipFlow。
     }
 
     private func recordSources(from urls: [URL]) {
