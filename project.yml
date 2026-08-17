@@ -20,17 +20,21 @@ settings:
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: targeted
     MACOSX_DEPLOYMENT_TARGET: "15.0"
-    # Homebrew 的 libmpv 只有当前机器的一种架构。Archive 默认会编
-    # Intel + Apple Silicon，于是链不上 mpv。只编本机架构。
+    # Archive 会忽略 ONLY_ACTIVE_ARCH，按 Standard 再编一套 Intel。
+    # Homebrew 的 libmpv 只有本机架构，Intel 那套会全部找不到符号。
     ONLY_ACTIVE_ARCH: YES
-    ARCHS: "$(NATIVE_ARCH_ACTUAL)"
+    ARCHS: arm64
+    VALID_ARCHS: arm64
+    EXCLUDED_ARCHS: x86_64
     # OpenGL 自 10.14 起废弃，但 libmpv 的渲染接口在 macOS 上只有它可用
     GCC_PREPROCESSOR_DEFINITIONS: GL_SILENCE_DEPRECATION=1
     OTHER_SWIFT_FLAGS: -D GL_SILENCE_DEPRECATION
   configs:
     Release:
       ONLY_ACTIVE_ARCH: YES
-      ARCHS: "$(NATIVE_ARCH_ACTUAL)"
+      ARCHS: arm64
+      VALID_ARCHS: arm64
+      EXCLUDED_ARCHS: x86_64
 
 targets:
   ClipFlow:
@@ -47,7 +51,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.seekerxun.ClipFlow
         PRODUCT_NAME: ClipFlow
         INFOPLIST_FILE: Sources/ClipFlow/Resources/Info.plist
-        CURRENT_PROJECT_VERSION: 2
+        CURRENT_PROJECT_VERSION: 3
         MARKETING_VERSION: "0.1.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_OBJC_BRIDGING_HEADER: Sources/ClipFlow/Resources/ClipFlow-Bridging-Header.h
@@ -68,7 +72,9 @@ targets:
         OTHER_LDFLAGS:
           - -lmpv
         ONLY_ACTIVE_ARCH: YES
-        ARCHS: "$(NATIVE_ARCH_ACTUAL)"
+        ARCHS: arm64
+        VALID_ARCHS: arm64
+        EXCLUDED_ARCHS: x86_64
 
     dependencies:
       - sdk: AVFoundation.framework
