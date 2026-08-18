@@ -82,6 +82,22 @@
 				<string>amv</string>
 			</array>
 		</dict>
+		<dict>
+			<!-- 不声明文件夹的话，系统压根不会把文件夹送过来：拖到程序坞图标上不亮，
+			     Finder 的「打开方式」里也没有片巡。代码这一侧一直是能收文件夹的
+			     （和菜单里的「打开文件夹…」走同一条路），缺的只是这份声明。
+			     仍用 Alternate：访达继续当文件夹的默认打开方式，片巡只是多一个选项。 -->
+			<key>CFBundleTypeName</key>
+			<string>视频文件夹</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
