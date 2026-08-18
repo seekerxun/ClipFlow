@@ -115,14 +115,17 @@ enum Bench {
         // --- 封面兜底比例 ---
         let records = await index.allRecords
         let fallbacks = records.filter { $0.coverIsFallback }.count
-        let failures = records.filter { $0.failure != nil }
+        let failures = records.filter { $0.coverFailure != nil || $0.spriteFailure != nil }
         print(String(format: "封面兜底（三个窗口都没有合格帧）：%d 个，占 %.1f%%",
                      fallbacks, Double(fallbacks) * 100 / Double(max(1, records.count))))
 
         if !failures.isEmpty {
             print("\n失败样例（最多 5 条）：")
             for record in failures.prefix(5) {
-                print("  \((record.key.path as NSString).lastPathComponent) — \(record.failure?.reason ?? "")")
+                let failure = record.coverFailure ?? record.spriteFailure
+                let stage = record.coverFailure != nil ? "封面" : "精灵图"
+                print("  \((record.key.path as NSString).lastPathComponent) — \(stage) "
+                      + "\(failure?.kind.rawValue ?? "")×\(failure?.attempts ?? 0) \(failure?.reason ?? "")")
             }
         }
         print("\n=== 结束 ===")

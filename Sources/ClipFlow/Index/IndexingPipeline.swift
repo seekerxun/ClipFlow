@@ -150,18 +150,57 @@ enum IndexingPipeline {
                 record.tileHeight = sprite.tileHeight
             }
 
-            record.failure = nil
+            // 只清本阶段的失败。精灵图成功不代表封面的问题也没了，反之亦然。
+            record.setFailure(nil, for: stage)
             await index.upsert(record)
             return .succeeded
 
         } catch is CancellationError {
+            // 用户滚离、切目录、关窗都会走到这里。这不是素材的问题，绝不落库，
+            // 否则正常文件会被自己的滚动操作拉黑。
             return .cancelled
         } catch {
-            record.failure = FailureRecord(
-                reason: String(describing: error), at: Date()
+            record.setFailure(
+                FailureRecord.next(
+                    after: record.failureRecord(for: stage),
+                    reason: String(describing: error),
+                    kind: failureKind(for: error)
+                ),
+                for: stage
             )
             await index.upsert(record)
             return .failed
         }
+    }
+
+    /// 把底层报错归到失败类别上。类别决定还要不要重试。
+    ///
+    /// 关键是别把超时当成坏文件：超时只说明当时机器忙或者素材在慢盘上，
+    /// 换个时候多半就过了。以前所有报错一视同仁，一次超时就永久跳过。
+    static func failureKind(for error: Error) -> FailureKind {
+        if let runner = error as? ProcessRunner.RunnerError, case .timedOut = runner {
+            return .timeout
+        }
+        if let probe = error as? MediaProbe.ProbeError {
+            switch probe {
+            case .timedOut:
+                return .timeout
+            case .noVideoTrack:
+                // 没有视频轨的文件再试一百次也出不来画面
+                return .unsupported
+            case .unreadable:
+                return .decodeError
+            }
+        }
+        if let ffmpeg = error as? FFmpegSpriteGenerator.GenerateError {
+            switch ffmpeg {
+            case .invalidImage, .blankFrame:
+                // 纯黑帧多半是解码落点没赶上关键帧，换个时间点重来常常就有画面
+                return .invalidImage
+            case .noFrames, .encodeFailed:
+                return .decodeError
+            }
+        }
+        return .decodeError
     }
 }

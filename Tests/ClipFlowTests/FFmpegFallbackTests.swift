@@ -281,7 +281,9 @@ final class FFmpegFallbackTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: spriteURL.path))
     }
 
-    func testRealFailurePersistsAndIsNotRetried() async throws {
+    /// 真实失败要落库，但不是一次就判死刑：可重试的类别给满
+    /// `FailureRecord.maxAttempts` 次，之后才停。
+    func testRealFailurePersistsAndStopsAfterMaxAttempts() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let invalid = directory.appending(path: "not-a-video.data")
@@ -289,20 +291,25 @@ final class FFmpegFallbackTests: XCTestCase {
         let item = MediaItem(url: invalid, size: 6, modifiedAt: Date())
         let index = MediaIndex(fileURL: directory.appending(path: "index.json"))
 
-        let first = await IndexingPipeline.processOne(
-            item: item, index: index, stage: .cover
-        )
-        guard case .failed = first else {
-            return XCTFail("坏文件应记录为真实失败")
+        for attempt in 1 ... FailureRecord.maxAttempts {
+            let outcome = await IndexingPipeline.processOne(
+                item: item, index: index, stage: .cover
+            )
+            guard case .failed = outcome else {
+                return XCTFail("第 \(attempt) 次：坏文件应记录为真实失败")
+            }
+            let stored = await index.record(for: item.key)
+            let failure = try XCTUnwrap(stored?.coverFailure)
+            XCTAssertEqual(failure.attempts, attempt)
+            // 封面失败不该牵连精灵图那一栏
+            XCTAssertNil(stored?.spriteFailure)
         }
-        let failedRecord = await index.record(for: item.key)
-        XCTAssertNotNil(failedRecord?.failure)
 
-        let second = await IndexingPipeline.processOne(
+        let afterCap = await IndexingPipeline.processOne(
             item: item, index: index, stage: .cover
         )
-        guard case .skipped = second else {
-            return XCTFail("相同缓存键的真实失败不应重复探测")
+        guard case .skipped = afterCap else {
+            return XCTFail("试满 \(FailureRecord.maxAttempts) 次之后不该再探测")
         }
     }
 

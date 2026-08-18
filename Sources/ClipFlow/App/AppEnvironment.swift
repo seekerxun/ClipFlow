@@ -437,7 +437,10 @@ final class AppEnvironment {
             record.coverTime = output.coverTime
             record.manualCoverTime = output.coverTime
             record.coverIsFallback = false
-            record.failure = nil
+            // 用户亲手指定了封面，等于宣告这个文件没问题：两个阶段的失败一起清，
+            // 这是卡住时唯一的人工解锁通道。
+            record.coverFailure = nil
+            record.spriteFailure = nil
             await index.upsert(record)
             try? await index.save()
             records[item.id] = record
