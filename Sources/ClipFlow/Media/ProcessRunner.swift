@@ -212,7 +212,10 @@ enum ProcessRunner {
                         stdout: result.3, stderr: result.4, terminationStatus: result.2
                     ))
                 } else {
-                    let message = String(data: result.4, encoding: .utf8) ?? ""
+                    // 同样不能假设 UTF-8：RealMedia 这类老容器的元数据会出现在
+                    // ffmpeg 的报错里，`String(data:encoding:.utf8)` 整段返回 nil，
+                    // 失败原因就成了空字符串，落进索引后看不出到底为什么失败。
+                    let message = String(decoding: result.4, as: UTF8.self)
                     continuation.resume(throwing: RunnerError.failed(
                         status: result.2, message: message
                     ))
