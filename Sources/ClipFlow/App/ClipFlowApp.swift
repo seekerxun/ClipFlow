@@ -48,6 +48,10 @@ private struct WindowRoot: View {
     @State private var box = EnvironmentBox()
     @Environment(\.openWindow) private var openWindow
     var initialURLs: [URL] = []
+    /// 这扇窗口能不能替别人再开一扇。兜底窗口是手工用 AppKit 建的，
+    /// 不属于任何 SwiftUI 场景，`openWindow` 在它里面未必管用，
+    /// 因此不让它接这个活，免得文件交出去之后没有下文。
+    var canOpenSceneWindows = true
 
     var body: some View {
         content(box.environment)
@@ -71,10 +75,16 @@ private struct WindowRoot: View {
                 }
             }
             .task {
-                SessionHub.shared.register(environment)
-                SessionHub.shared.openNewWindow = { urls in
-                    openWindow(id: "opened", value: OpenPayload(urls: urls))
+                // 「再开一扇窗口」的能力跟着这扇窗口一起登记，窗口关掉就一并注销。
+                // 之前它是一个全局闭包，关窗时没人清，于是「关光再打开」这条路
+                // 走的是一扇已经拆掉的窗口留下的闭包。
+                var opener: (([URL]) -> Void)?
+                if canOpenSceneWindows {
+                    opener = { urls in
+                        openWindow(id: "opened", value: OpenPayload(urls: urls))
+                    }
                 }
+                SessionHub.shared.register(environment, opener: opener)
                 var urls = initialURLs
                 if urls.isEmpty {
                     urls = SessionHub.shared.takePending()
@@ -350,7 +360,6 @@ final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
 final class SessionHub {
     static let shared = SessionHub()
 
-    var openNewWindow: (([URL]) -> Void)?
     /// 一扇窗口都没有的时候用它开出第一扇。菜单在启动时就建好了，
     /// 因此这个闭包比任何窗口都早拿到手。
     private var openMainWindow: (() -> Void)?
@@ -359,28 +368,46 @@ final class SessionHub {
     /// 这里按注册先后记一份顺序，永远优先最早注册的那个（就是主窗口）。
     private var order: [ObjectIdentifier] = []
     private var sessions: [ObjectIdentifier: AppEnvironment] = [:]
+    /// 各窗口交上来的「再开一扇窗口」的能力，和窗口一起登记、一起注销，
+    /// 因此永远不会用到已经拆掉的那扇窗口留下的闭包。
+    private var openers: [ObjectIdentifier: ([URL]) -> Void] = [:]
     private var pending: [URL] = []
+
+    /// 兜底开窗的实现。默认绕开 SwiftUI 直接用 AppKit 开一扇，测试里换掉免得真弹窗。
+    var makeFallbackWindow: (() -> Void)?
 
     /// 一次「打开多个文件」会被系统拆成好几条事件陆续送来。逐条处理的话，
     /// 每条都会各自去找窗口，最后开出好几扇。先把一小段时间内送到的文件攒成一批，
     /// 再统一决定放进哪扇窗口。
     private var batch: [URL] = []
     private var batchTask: Task<Void, Never>?
-    private static let batchWindow = Duration.milliseconds(250)
+    /// 攒批的时长。测试里调小，免得干等。
+    var batchWindow = Duration.milliseconds(250)
+
+    /// 叫过开窗之后，等多久还没人来取文件，就认定那条路没走通。
+    var windowWait = Duration.milliseconds(1500)
+    private var rescueTask: Task<Void, Never>?
 
     private var orderedSessions: [AppEnvironment] {
         order.compactMap { sessions[$0] }
     }
 
-    func register(_ env: AppEnvironment) {
+    /// 还活着的窗口里，登记最早的那扇交上来的开窗能力。
+    private var liveOpener: (([URL]) -> Void)? {
+        order.lazy.compactMap { self.openers[$0] }.first
+    }
+
+    func register(_ env: AppEnvironment, opener: (([URL]) -> Void)? = nil) {
         let id = ObjectIdentifier(env)
         if sessions[id] == nil { order.append(id) }
         sessions[id] = env
+        openers[id] = opener
     }
 
     func unregister(_ env: AppEnvironment) {
         let id = ObjectIdentifier(env)
         sessions.removeValue(forKey: id)
+        openers.removeValue(forKey: id)
         order.removeAll { $0 == id }
     }
 
@@ -393,8 +420,8 @@ final class SessionHub {
         // 同一批里重复的文件只留一份：兜底回调和事件处理可能把同一个文件送两遍。
         for url in urls where !batch.contains(url) { batch.append(url) }
         batchTask?.cancel()
-        batchTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.batchWindow)
+        batchTask = Task { [weak self, wait = batchWindow] in
+            try? await Task.sleep(for: wait)
             guard !Task.isCancelled else { return }
             self?.flushBatch()
         }
@@ -418,13 +445,58 @@ final class SessionHub {
             }
             return
         }
-        if let openNewWindow {
-            openNewWindow(urls)
+        if let liveOpener {
+            liveOpener(urls)
             return
         }
         // 一扇窗口都没有：文件先存着，等新窗口起来自己来取。
+        // 已经在等窗口的话就只是搭个车，不要再叫一扇，否则又会多出空窗口。
+        let alreadyWaiting = !pending.isEmpty
         pending.append(contentsOf: urls)
-        openMainWindow?()
+        guard !alreadyWaiting else { return }
+        requestWindow()
+    }
+
+    /// 开出第一扇窗口。首选启动时拿到的那条 SwiftUI 路径——但它是菜单求值时
+    /// 顺手记下的副作用，没有任何先后保证，因此这里不当它必然存在：
+    /// 拿不到就直接用 AppKit 开；拿到了也留一个看门狗，万一叫了却没开出窗口，
+    /// 文件会一直躺在 `pending` 里，用户既看不到窗口也看不到报错。
+    private func requestWindow() {
+        rescueTask?.cancel()
+        rescueTask = nil
+        guard let openMainWindow else {
+            openFallbackWindow()
+            return
+        }
+        openMainWindow()
+        rescueTask = Task { [weak self, wait = windowWait] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled else { return }
+            self?.rescuePending()
+        }
+    }
+
+    /// 看门狗到点，文件还没人取。
+    private func rescuePending() {
+        rescueTask = nil
+        guard !pending.isEmpty else { return }
+        guard !sessions.isEmpty else {
+            // 还是一扇窗口都没有，那条路确实没走通，自己开一扇。
+            openFallbackWindow()
+            return
+        }
+        // 窗口起来了却没来取，直接送过去。
+        let urls = pending
+        pending = []
+        deliver(urls)
+    }
+
+    private func openFallbackWindow() {
+        if let makeFallbackWindow {
+            makeFallbackWindow()
+            return
+        }
+        FallbackWindow.open()
     }
 
     /// 把持有这份列表的那扇窗口叫到最前面。
@@ -435,9 +507,48 @@ final class SessionHub {
     }
 
     func takePending() -> [URL] {
+        // 有窗口来取文件了，看门狗就不用再守着。
+        rescueTask?.cancel()
+        rescueTask = nil
         let urls = pending
         pending = []
         return urls
+    }
+}
+
+/// 最后的兜底：SwiftUI 那条开窗路径没生效时，绕开它直接用 AppKit 开一扇窗口。
+/// 里面装的还是同一套 `WindowRoot`，因此拿到文件之后的表现和普通窗口一致。
+///
+/// 这条路正常永远不会走到。留着是因为另一条路的入口是 SwiftUI 求值菜单时的副作用，
+/// 一旦它没跑，文件就会无声无息地消失——宁可多开一扇不那么标准的窗口。
+@MainActor
+private enum FallbackWindow {
+    /// 手工建出来的窗口没人替我们留引用，得自己拿着，等它关掉再放手。
+    private static var windows: [NSWindow] = []
+
+    static func open() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.title = "片巡"
+        window.contentView = NSHostingView(rootView: WindowRoot(canOpenSceneWindows: false))
+        window.center()
+        windows.append(window)
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak window] _ in
+            MainActor.assumeIsolated {
+                windows.removeAll { $0 === window }
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 }
 
