@@ -20,7 +20,20 @@ enum SpriteSpec {
     static let coverSourceMax = 720
 
     static let startFraction = 0.03
-    static let endFraction = 0.97
+    /// 取样窗口的结尾。0.97 太贴片尾：结尾附近的 seek 会命中「退出码 0、
+    /// 文件结构完整、画面全黑」的帧，改到 0.90 让整条窗口离开这个危险区。
+    static let endFraction = 0.90
+
+    /// 取样点的安全上限。
+    ///
+    /// 实测 5762 秒的 MKV 在 5760 秒处会写出亮度均值精确为 0 的纯黑 JPEG，
+    /// 退出码和文件大小都看不出异常，只能靠时间点本身避开。长片一律留 2 秒余量；
+    /// 短片改按 5% 按比例留——6 秒的素材若硬扣 2 秒，整个取样窗口会被压塌。
+    static func clampedTime(_ seconds: Double, duration: Double) -> Double {
+        guard duration > 0 else { return 0 }
+        let margin = min(2, duration * 0.05)
+        return min(max(0, seconds), max(0, duration - margin))
+    }
 
     static let spriteQuality: CGFloat = 0.75
     static let coverQuality: CGFloat = 0.85
@@ -126,7 +139,9 @@ enum SpriteGenerator {
 
         for fraction in fractions {
             try Task.checkCancellation()
-            let seconds = info.duration * fraction
+            let seconds = SpriteSpec.clampedTime(
+                info.duration * fraction, duration: info.duration
+            )
             let time = CMTime(seconds: seconds, preferredTimescale: 600)
             guard let image = try? await generator.image(at: time).image else { continue }
             decoded += 1
@@ -261,7 +276,8 @@ enum SpriteGenerator {
         return (0..<SpriteSpec.frameCount).map { index in
             let fraction = SpriteSpec.startFraction
                 + span * Double(index) / Double(SpriteSpec.frameCount - 1)
-            return CMTime(seconds: duration * fraction, preferredTimescale: 600)
+            let seconds = SpriteSpec.clampedTime(duration * fraction, duration: duration)
+            return CMTime(seconds: seconds, preferredTimescale: 600)
         }
     }
 

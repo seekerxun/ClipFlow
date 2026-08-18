@@ -17,7 +17,8 @@ enum CoverPicker {
 
     /// 放宽后的兜底窗口。
     static let fallbackStartFraction = 0.20
-    static let fallbackEndFraction = 0.95
+    /// 0.95 会把候选点推到片尾危险区（seek 到那里可能拿到全黑帧），收到 0.90。
+    static let fallbackEndFraction = 0.90
 
     /// 短于这个时长就不做时间偏置——三秒的片子谈不上「片头」。
     static let shortClipThreshold = 4.0
@@ -29,6 +30,13 @@ enum CoverPicker {
         /// 近乎纯色：黑场、淡入淡出、白底 logo 卡都会落进来。
         var isNearUniform: Bool {
             meanLuma < 16 || meanLuma > 240 || stdLuma < 12
+        }
+
+        /// 纯黑帧。片尾附近的 seek 会返回退出码 0、结构完整但整幅全黑的图，
+        /// 实测亮度均值精确为 0，只能靠像素判。阈值取 2 而不是复用上面的 16：
+        /// 这里要的是「解码没给出画面」这一种硬失败，暗场景不该被算进来。
+        var isBlank: Bool {
+            meanLuma < 2
         }
     }
 

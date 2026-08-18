@@ -213,8 +213,11 @@ final class FFmpegFallbackTests: XCTestCase {
         XCTAssertLessThanOrEqual(automatic.coverTime, info.duration)
         XCTAssertEqual(sprite.timestamps.count, SpriteSpec.frameCount)
         XCTAssertGreaterThanOrEqual(sprite.timestamps.min() ?? -1, 0)
-        XCTAssertLessThanOrEqual(sprite.timestamps.max() ?? .infinity, info.duration)
-        XCTAssertEqual(sprite.timestamps.last ?? -1, 44, accuracy: 0.001)
+        // 取样窗口收到 0.90 并再扣掉 2 秒片尾余量后，最后一个取样点落在 40.5 秒，
+        // 命中的真实帧是 41 秒那一张，不再贴着 44 秒的片尾——那里的 seek 会返回
+        // 退出码正常但整幅全黑的帧。
+        XCTAssertLessThanOrEqual(sprite.timestamps.max() ?? .infinity, info.duration - 2)
+        XCTAssertEqual(sprite.timestamps.last ?? -1, 41, accuracy: 0.001)
     }
 
     func testPartialAVFrameSetIsRejected() {
@@ -381,6 +384,63 @@ final class FFmpegFallbackTests: XCTestCase {
         }
         XCTAssertLessThan(Date().timeIntervalSince(started), 0.25)
         XCTAssertTrue(stopped.value)
+    }
+
+    // MARK: - 顺序回退的闸门
+
+    /// 取样点全落在纯黑画面上，不该退回顺序解码。
+    ///
+    /// 顺序回退的滤镜链固定会带上第 0 帧。这条素材开头半秒有画面、其余全黑，
+    /// 所以一旦误走回退就能捞到那半秒、把整张精灵图「救」出来——正因为如此，
+    /// 它能把两种写法区分开：走回退会成功，不走回退按 blankFrame 失败。
+    /// 真实素材里这一趟只是白烧几十秒解码，救不了任何东西。
+    func testAllBlankSamplePointsDoNotTriggerSequentialFallback() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let video = directory.appending(path: "black-tail.mp4")
+        try await runFFmpeg([
+            "-f", "lavfi", "-i", "testsrc2=s=160x120:r=10:d=0.5",
+            "-f", "lavfi", "-i", "color=c=black:s=160x120:r=10:d=29.5",
+            "-filter_complex", "[0:v][1:v]concat=n=2:v=1[out]",
+            "-map", "[out]", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            video.path(percentEncoded: false)
+        ])
+
+        let info = try await FFmpegMediaProbe.probe(video)
+        // 24 个取样点在 0.9 秒到 28 秒之间，全部落在黑画面里
+        XCTAssertEqual(info.duration, 30, accuracy: 0.1)
+
+        do {
+            _ = try await FFmpegSpriteGenerator.generate(url: video, info: info)
+            XCTFail("取样点全黑属于画面无效，应直接报 blankFrame，不该靠顺序回退捞第 0 帧")
+        } catch FFmpegSpriteGenerator.GenerateError.blankFrame {
+            // 预期结果
+        }
+    }
+
+    /// 一帧都没解出来才是顺序回退要治的病，这一条必须继续走回退。
+    ///
+    /// 整条 MPEG-TS 只有开头一个关键帧，任何按时间的输入 seek 都落在 GOP 中间，
+    /// 一路读到 EOF 也出不了画面（已实测：24 个取样点全部零输出）。
+    func testInputSeekDecodingNothingStillFallsBackToSequentialSheet() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let video = directory.appending(path: "no-index.ts")
+        try await runFFmpeg([
+            "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=1",
+            "-t", "40", "-c:v", "libx264", "-g", "250", "-keyint_min", "250",
+            "-sc_threshold", "0", "-pix_fmt", "yuv420p",
+            "-muxdelay", "0", "-f", "mpegts",
+            video.path(percentEncoded: false)
+        ])
+
+        let info = try await FFmpegMediaProbe.probe(video)
+        // 顺序回退是这条素材唯一的出路：不走它这里只能抛错
+        let output = try await FFmpegSpriteGenerator.generate(url: video, info: info)
+        XCTAssertEqual(output.timestamps.count, SpriteSpec.frameCount)
+        XCTAssertEqual(output.tileWidth, SpriteSpec.maxTileDimension)
+        XCTAssertGreaterThanOrEqual(output.timestamps.min() ?? -1, 0)
+        XCTAssertLessThanOrEqual(output.timestamps.max() ?? .infinity, info.duration)
     }
 
     private func runFFmpeg(_ arguments: [String]) async throws {
