@@ -71,7 +71,18 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
         updateCoalescer?.invalidate()
         if let renderContext {
             mpv_render_context_set_update_callback(renderContext, nil, nil)
+            // mpv 拆 render context 时要删掉自己那批纹理和帧缓冲，用的是「此刻正好
+            // 绑在本线程上的那个 GL 上下文」，而不是当初建它的那个。画面每帧都在主
+            // 线程上绑好上下文再画、画完不解绑，所以轮到关窗口时，绑着的往往是另一
+            // 扇窗口的上下文。那批编号在人家那儿另有所指，照着删就把还在放的那扇窗口
+            // 的画面拆没了——关掉一扇，另一扇只剩声音和还在走的时间码。
+            // 所以先把自己的上下文绑回来再删，删完解绑，不给后面的人留下一个错的当前上下文。
+            let cgl = openGLContext?.cglContextObj
+            openGLContext?.makeCurrentContext()
+            if let cgl { CGLLockContext(cgl) }
             mpv_render_context_free(renderContext)
+            if let cgl { CGLUnlockContext(cgl) }
+            NSOpenGLContext.clearCurrentContext()
             self.renderContext = nil
         }
         if let updateCallbackContext {
