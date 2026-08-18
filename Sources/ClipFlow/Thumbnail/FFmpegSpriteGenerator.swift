@@ -528,7 +528,10 @@ enum FFmpegSpriteGenerator {
     }
 
     private static func parseShowInfoTimes(_ data: Data, label: String? = nil) -> [Double] {
-        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        // 必须容错解码。RealMedia 这类老容器的元数据不是 UTF-8，
+        // `String(data:encoding:.utf8)` 会整段返回 nil，showinfo 行随之全部丢失，
+        // 一个能正常解码的文件会被判成「没有帧」。
+        let text = String(decoding: data, as: UTF8.self)
         return text.split(whereSeparator: \.isNewline).compactMap { line in
             guard line.contains(label ?? "showinfo"),
                   let range = line.range(of: "pts_time:")
