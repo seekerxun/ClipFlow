@@ -25,6 +25,9 @@ actor MediaIndex {
 
     private(set) var lastLoadReport = LoadReport()
 
+    /// `load()` 至少跑过一次。没跑过就落盘等于拿空索引覆盖用户的缓存。
+    private var hasLoaded = false
+
     init(fileURL: URL? = nil) {
         if let fileURL {
             self.fileURL = fileURL
@@ -40,7 +43,10 @@ actor MediaIndex {
 
     func load() {
         var report = LoadReport()
-        defer { lastLoadReport = report }
+        defer {
+            lastLoadReport = report
+            hasLoaded = true
+        }
 
         guard let data = try? Data(contentsOf: fileURL) else { return }
 
@@ -106,6 +112,13 @@ actor MediaIndex {
     }
 
     func save() throws {
+        // 启动期是有竞态的：`AppEnvironment` 把 load 丢进 Task，而空队列的
+        // ThumbnailQueue 会立刻 save 一次。save 先跑完的话，用户攒了几千条的索引
+        // 会被内存里那份空的整份覆盖掉。没 load 过就不许盖已有文件。
+        guard hasLoaded || !FileManager.default.fileExists(
+            atPath: fileURL.path(percentEncoded: false)
+        ) else { return }
+
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )

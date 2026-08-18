@@ -289,6 +289,42 @@ final class IndexFailurePolicyTests: XCTestCase {
         )
     }
 
+    /// 启动期 load 还没跑完就 save，绝不能把已有索引覆盖成空。
+    func testSaveBeforeLoadDoesNotOverwriteExistingIndex() async throws {
+        let key = makeKey(path: "/tmp/clipflow-test/existing.mp4")
+        let url = temporaryIndexURL()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+
+        let writer = MediaIndex(fileURL: url)
+        await writer.load()
+        await writer.upsert(makeCompleteRecord(key: key))
+        try await writer.save()
+        let before = try Data(contentsOf: url)
+
+        // 另一个实例还没 load 就抢先 save
+        let racer = MediaIndex(fileURL: url)
+        try await racer.save()
+        XCTAssertEqual(try Data(contentsOf: url), before, "load 之前的 save 不能落盘")
+
+        // load 之后照常可以写
+        await racer.load()
+        let count = await racer.count
+        XCTAssertEqual(count, 1)
+        try await racer.save()
+    }
+
+    func testSaveOnFreshInstallStillWorks() async throws {
+        let url = temporaryIndexURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let index = MediaIndex(fileURL: url)
+        // 文件本来就不存在，没有任何东西可以被覆盖，第一次 save 必须写出来
+        try await index.save()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path(percentEncoded: false)))
+    }
+
     func testUnreadableFileIsBackedUpAndNotSilentlyDiscarded() async throws {
         let url = temporaryIndexURL()
         try FileManager.default.createDirectory(
