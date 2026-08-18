@@ -33,11 +33,22 @@ struct ClipFlowApp: App {
 
 /// 每个窗口自己的列表和播放，互不影响。
 private struct WindowRoot: View {
-    @State private var environment = AppEnvironment()
+    /// SwiftUI 每重建一次 `WindowRoot` 结构体，都会把属性默认值重新求一遍。
+    /// 直接写 `@State private var environment = AppEnvironment()` 会因此凭空多造
+    /// 几套环境，每套都自带一个 mpv 实例；被丢弃的那几套析构时又会把仍挂在屏幕上的
+    /// 渲染后端一起卸掉，真正在用的播放器于是永远等不到「渲染就绪」，
+    /// 文件只能卡在待播队列里——表现就是列表里有、画面全黑、进度停在 0:00 / 0:00。
+    /// 用一个空壳盒子占位，环境只在第一次真正取用时创建。
+    @State private var box = EnvironmentBox()
     @Environment(\.openWindow) private var openWindow
     var initialURLs: [URL] = []
 
     var body: some View {
+        content(box.environment)
+    }
+
+    @ViewBuilder
+    private func content(_ environment: AppEnvironment) -> some View {
         MainView()
             .environment(environment)
             .preferredColorScheme(.dark)
@@ -48,7 +59,7 @@ private struct WindowRoot: View {
                     fileURL: environment.selectedItem?.url
                 )
                 WindowCloseObserver {
-                    closeWindow()
+                    closeWindow(environment)
                 }
             }
             .task {
@@ -64,17 +75,30 @@ private struct WindowRoot: View {
                     await environment.addURLs(urls)
                 }
             }
-            .onDisappear {
-                // 关闭通知是主路径；视图移除时再调用一次只作兜底。
-                closeWindow()
-            }
+            // 不要在 `onDisappear` 里拆播放实例。SwiftUI 在启动期会把视图树整体
+            // 拆一次再建回来，`onDisappear` 对这种重建和用户关窗一视同仁；照它拆的话
+            // 一启动就把还要接着用的播放实例干掉了。清理只认窗口关闭通知。
     }
 
     /// 只清理本窗口持有的播放实例。`PlaybackController.shutdown()` 可重复调用，
-    /// 因而关闭通知和 SwiftUI 视图移除的先后顺序不会影响其他窗口。
-    private func closeWindow() {
+    /// 而且事后还能重建，因而关闭通知和 SwiftUI 视图重建的先后顺序不会留下后遗症。
+    private func closeWindow(_ environment: AppEnvironment) {
         environment.playback.shutdown()
         SessionHub.shared.unregister(environment)
+    }
+}
+
+/// 只为了让环境「按需创建一次」。盒子本身很轻，重复构造无副作用；
+/// 里面的 `AppEnvironment` 只有第一次被读到时才真正建出来。
+private final class EnvironmentBox {
+    private var stored: AppEnvironment?
+
+    @MainActor
+    var environment: AppEnvironment {
+        if let stored { return stored }
+        let created = AppEnvironment()
+        stored = created
+        return created
     }
 }
 
@@ -124,6 +148,11 @@ private struct WindowCloseObserver: NSViewRepresentable {
             stopObserving()
             self.window = window
             guard let window else { return }
+
+            // 换到另一扇窗口就重新计一次。`didClose` 只防同一扇窗口重复触发；
+            // 忘了归零的话，启动期那次误报会把真正的关窗一并吃掉，
+            // 这扇窗口的播放实例和列表就再也没人回收了。
+            didClose = false
 
             closeObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification,

@@ -69,7 +69,6 @@ final class PlaybackController {
     @ObservationIgnored private var isRenderReady = false
     @ObservationIgnored private var fullscreenObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var abSeekPending = false
-    @ObservationIgnored private var didShutdown = false
 
     init() {
         let defaults = UserDefaults.standard
@@ -82,7 +81,22 @@ final class PlaybackController {
             loopMode = savedLoopMode
         }
 
-        guard mpv.create() else { return }
+        startEngine()
+    }
+
+    deinit {
+        shutdown()
+    }
+
+    /// 建一份 libmpv 实例并接上回调。已经有实例就当作已经成功。
+    ///
+    /// 这段本来直接写在 `init` 里。拆出来是因为播放实例必须能重建：窗口关闭
+    /// 通知会在启动期误报一次（见 `shutdown()` 的注释），实例被拆掉之后
+    /// 得能原地长回来，不能一次误报就让这扇窗口永远放不了片。
+    @discardableResult
+    private func startEngine() -> Bool {
+        if mpv.rawHandle != nil { return true }
+        guard mpv.create() else { return false }
 
         mpv.setOption("vo", "libmpv")
         mpv.setOption("idle", "yes")
@@ -96,20 +110,28 @@ final class PlaybackController {
         mpv.setOption("terminal", "no")
         mpv.setOption("osd-level", "0")
 
-        guard mpv.initialize() else { return }
+        guard mpv.initialize() else {
+            // 半成品句柄不能留着：留着的话 `rawHandle != nil` 会一直挡住重建。
+            mpv.shutdown()
+            return false
+        }
 
         wireCallbacks()
-        observeFullscreen()
+        if fullscreenObservers.isEmpty {
+            observeFullscreen()
+        }
+        // 重建出来的实例是全新的，界面上已有的音量 / 静音 / 倍速要重新交代一遍。
         mpv.setDouble("volume", volume)
+        mpv.setFlag("mute", isMuted)
+        mpv.setDouble("speed", speed)
         applyLoopFileOption()
-    }
-
-    deinit {
-        shutdown()
+        return true
     }
 
     /// 由 `MPVVideoView` 在创建宿主视图时调用。只接收抽象后端。
     func attachRenderBackend(_ backend: MPVRenderBackend) {
+        // 已经挂好并且就绪的话就别再来一遍：界面每次刷新都会调用这里。
+        if self.backend === backend, isRenderReady { return }
         if let old = self.backend, old !== backend {
             old.detach()
         }
@@ -118,30 +140,48 @@ final class PlaybackController {
         backend.onRenderContextReady = { [weak self] in
             self?.handleRenderContextReady()
         }
+        startEngine()
         if let handle = mpv.rawHandle {
             backend.attach(mpvHandle: handle)
         }
     }
 
+    /// 拆掉渲染上下文和 libmpv 实例。可以重复调用，也可以被后面的重建撤销。
+    ///
+    /// 这里刻意不做成一次性的。SwiftUI 在启动期会把窗口连同视图树拆一次再建
+    /// 回来，AppKit 为那扇短命的窗口发的是货真价实的关闭通知，光看通知分不出
+    /// 「用户关窗」和「框架重建」。做成一次性的话，那一次误报就会把这扇窗口的
+    /// 播放实例永久判死。真正的关窗由对象析构兜底，误报则由随后的重新挂载修好。
     func shutdown() {
-        guard !didShutdown else { return }
-        didShutdown = true
-
-        pendingURL = nil
-        onPlaybackEnded = nil
         // render context 必须先于 libmpv 句柄销毁；否则后端仍可能访问已释放句柄。
         backend?.detach()
-        backend = nil
         isRenderReady = false
+        isLoaded = false
         mpv.shutdown()
         fullscreenObservers.forEach { NotificationCenter.default.removeObserver($0) }
         fullscreenObservers.removeAll()
+    }
+
+    /// 待播文件还在队列里，但底下的实例被拆过。就地重建一份并重新挂回画面。
+    private func recoverEngineIfNeeded() {
+        guard mpv.rawHandle == nil, let backend else { return }
+        guard startEngine(), let handle = mpv.rawHandle else { return }
+        isRenderReady = false
+        backend.onRenderContextReady = { [weak self] in
+            self?.handleRenderContextReady()
+        }
+        backend.attach(mpvHandle: handle)
     }
 
     // MARK: - 加载 / 播放
 
     func loadFile(_ url: URL) {
         pendingURL = url
+        if !isRenderReady {
+            recoverEngineIfNeeded()
+            // 重建过程中就绪的话，待播队列已经把这条播掉了，不必再来一次。
+            guard pendingURL != nil else { return }
+        }
         guard isRenderReady else { return }
         pendingURL = nil
         isLoaded = false

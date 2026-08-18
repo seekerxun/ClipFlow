@@ -58,6 +58,9 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
 
     func attach(mpvHandle: OpaquePointer) {
         self.mpvHandle = mpvHandle
+        // 控制器每次挂载都会把就绪标志清回 false，这里同步重置一次：
+        // 同一个后端被重新挂载时也要再补一次就绪通知，否则待播文件会被永远挂起。
+        didNotifyReady = false
         tryCreateRenderContext()
     }
 
@@ -93,7 +96,18 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
     }
 
     private func tryCreateRenderContext() {
-        guard renderContext == nil, let mpvHandle, openGLContext != nil else { return }
+        guard let mpvHandle, openGLContext != nil else { return }
+        guard makeRenderContextIfNeeded(mpvHandle: mpvHandle) else { return }
+
+        guard !didNotifyReady else { return }
+        didNotifyReady = true
+        onRenderContextReady?()
+    }
+
+    /// 已经有上下文就直接算成功：一个 mpv 实例只能有一个 render context，
+    /// 重复创建会失败。返回值只表示“现在有可用的上下文”。
+    private func makeRenderContextIfNeeded(mpvHandle: OpaquePointer) -> Bool {
+        if renderContext != nil { return true }
 
         openGLContext?.makeCurrentContext()
 
@@ -122,7 +136,7 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
 
         guard status >= 0, let context else {
             NSLog("mpv_render_context_create 失败: \(status)")
-            return
+            return false
         }
         renderContext = context
 
@@ -141,9 +155,7 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
             coalescer.request()
         }, callbackContext)
 
-        guard !didNotifyReady else { return }
-        didNotifyReady = true
-        onRenderContextReady?()
+        return true
     }
 
     // MARK: - 绘制
@@ -171,6 +183,9 @@ final class MPVGLBackend: NSOpenGLView, MPVRenderBackend {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         observeFullscreenTransition(in: window)
+        // 挂进窗口才拿得到 drawable。若之前建上下文失败过，这里再补一次机会，
+        // 免得控制器一直等不到就绪、待播文件卡死。
+        tryCreateRenderContext()
     }
 
     private func renderLatestFrame(force: Bool) {

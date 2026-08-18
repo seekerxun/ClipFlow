@@ -12,5 +12,10 @@ struct MPVVideoView: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: MPVGLBackend, context: Context) {}
+    /// 播放器实例可能在视图存活期间被换掉。不在这里补挂，画面就留在旧实例上，
+    /// 新实例永远等不到渲染就绪，待播文件会一直卡在队列里。
+    /// `attachRenderBackend` 对「已经挂好且就绪」的组合是空操作。
+    func updateNSView(_ nsView: MPVGLBackend, context: Context) {
+        controller.attachRenderBackend(nsView)
+    }
 }
