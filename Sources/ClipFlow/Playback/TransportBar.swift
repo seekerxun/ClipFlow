@@ -149,7 +149,7 @@ struct TransportBar: View {
         .onContinuousHover { phase in
             switch phase {
             case .active(let location):
-                guard controller.isLoaded, controller.duration > 0 else {
+                guard previewDuration > 0 else {
                     hoverTime = nil
                     hoverX = nil
                     return
@@ -157,7 +157,7 @@ struct TransportBar: View {
                 let width = max(sliderWidth, 1)
                 let x = min(max(location.x, 0), width)
                 hoverX = x
-                hoverTime = (x / width) * controller.duration
+                hoverTime = (x / width) * previewDuration
             case .ended:
                 hoverTime = nil
                 hoverX = nil
@@ -212,9 +212,16 @@ struct TransportBar: View {
         return hoverTime
     }
 
+    /// 悬停预览用的时长。播放内核还没报出时长时退回索引里的那份：
+    /// 预览读的是磁盘上的精灵图，本来就不依赖播放器是否已经就绪。
+    private var previewDuration: Double {
+        if controller.duration > 0 { return controller.duration }
+        return previewRecord?.duration ?? 0
+    }
+
     private var previewX: CGFloat? {
-        if isScrubbing, controller.duration > 0, sliderWidth > 0 {
-            return min(max(scrubTime / controller.duration * sliderWidth, 0), sliderWidth)
+        if isScrubbing, previewDuration > 0, sliderWidth > 0 {
+            return min(max(scrubTime / previewDuration * sliderWidth, 0), sliderWidth)
         }
         return hoverX
     }
@@ -278,7 +285,7 @@ struct TransportBar: View {
             let index = SeekPreview.frameIndex(
                 time: time,
                 timestamps: previewRecord?.spriteTimestamps ?? [],
-                duration: controller.duration
+                duration: previewDuration
             )
             if let tile = SeekPreview.tile(from: spriteCG, record: previewRecord, index: index) {
                 return tile

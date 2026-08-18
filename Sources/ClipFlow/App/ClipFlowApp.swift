@@ -20,6 +20,11 @@ struct ClipFlowApp: App {
             WindowRoot()
         }
         .defaultSize(width: 1280, height: 800)
+        // 系统的窗口恢复会把上次退出时的窗口一并重开，而每扇窗口都自带一套
+        // 播放实例。累积几次之后启动就会叠出好几扇窗口：最前面那扇往往是空的，
+        // 打开的文件却进了后面某一扇——看起来就是「列表里有、但放不了」。
+        // 列表本来就不做会话恢复，这里直接关掉。
+        .restorationBehavior(.disabled)
         .commands {
             ClipFlowCommands()
         }
@@ -28,6 +33,7 @@ struct ClipFlowApp: App {
             WindowRoot(initialURLs: payload?.resolvedURLs ?? [])
         }
         .defaultSize(width: 1280, height: 800)
+        .restorationBehavior(.disabled)
     }
 }
 
@@ -58,7 +64,9 @@ private struct WindowRoot: View {
                     title: environment.selectedItem?.name ?? "片巡",
                     fileURL: environment.selectedItem?.url
                 )
-                WindowCloseObserver {
+                WindowCloseObserver { window in
+                    environment.hostWindow = window
+                } onClose: {
                     closeWindow(environment)
                 }
             }
@@ -104,10 +112,11 @@ private final class EnvironmentBox {
 
 /// 监听自己所在的那一扇窗口，不能用应用级关闭通知，否则多窗口会互相误伤。
 private struct WindowCloseObserver: NSViewRepresentable {
+    let onWindow: (NSWindow) -> Void
     let onClose: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onClose: onClose)
+        Coordinator(onWindow: onWindow, onClose: onClose)
     }
 
     func makeNSView(context: Context) -> WindowObserverView {
@@ -119,6 +128,7 @@ private struct WindowCloseObserver: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: WindowObserverView, context: Context) {
+        context.coordinator.onWindow = onWindow
         context.coordinator.onClose = onClose
         context.coordinator.observe(window: nsView.window)
     }
@@ -128,12 +138,14 @@ private struct WindowCloseObserver: NSViewRepresentable {
     }
 
     final class Coordinator {
+        var onWindow: (NSWindow) -> Void
         var onClose: () -> Void
         private weak var window: NSWindow?
         private var closeObserver: NSObjectProtocol?
         private var didClose = false
 
-        init(onClose: @escaping () -> Void) {
+        init(onWindow: @escaping (NSWindow) -> Void, onClose: @escaping () -> Void) {
+            self.onWindow = onWindow
             self.onClose = onClose
         }
 
@@ -153,6 +165,7 @@ private struct WindowCloseObserver: NSViewRepresentable {
             // 忘了归零的话，启动期那次误报会把真正的关窗一并吃掉，
             // 这扇窗口的播放实例和列表就再也没人回收了。
             didClose = false
+            onWindow(window)
 
             closeObserver = NotificationCenter.default.addObserver(
                 forName: NSWindow.willCloseNotification,
@@ -272,21 +285,38 @@ final class SessionHub {
     static let shared = SessionHub()
 
     var openNewWindow: (([URL]) -> Void)?
+    /// 字典的遍历顺序是不确定的，直接 `sessions.values.first` 会把文件随机丢给
+    /// 某一扇窗口——有时正好是屏幕上那扇，有时是别的，于是同一个操作时灵时不灵。
+    /// 这里按注册先后记一份顺序，永远优先最早注册的那个（就是主窗口）。
+    private var order: [ObjectIdentifier] = []
     private var sessions: [ObjectIdentifier: AppEnvironment] = [:]
     private var pending: [URL] = []
 
+    private var orderedSessions: [AppEnvironment] {
+        order.compactMap { sessions[$0] }
+    }
+
     func register(_ env: AppEnvironment) {
-        sessions[ObjectIdentifier(env)] = env
+        let id = ObjectIdentifier(env)
+        if sessions[id] == nil { order.append(id) }
+        sessions[id] = env
     }
 
     func unregister(_ env: AppEnvironment) {
-        sessions.removeValue(forKey: ObjectIdentifier(env))
+        let id = ObjectIdentifier(env)
+        sessions.removeValue(forKey: id)
+        order.removeAll { $0 == id }
     }
 
     func open(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
-        if let idle = sessions.values.first(where: { $0.items.isEmpty }) {
-            Task { await idle.addURLs(urls) }
+        if let idle = orderedSessions.first(where: { $0.items.isEmpty }) {
+            Task {
+                await idle.addURLs(urls)
+                // 收下文件的那扇窗口未必在最前面（系统可能刚替我们又开了一扇空窗）。
+                // 不提到前面的话，用户看到的是一扇空窗，文件像是没打开。
+                bringToFront(idle)
+            }
             return
         }
         if let openNewWindow {
@@ -294,6 +324,13 @@ final class SessionHub {
             return
         }
         pending.append(contentsOf: urls)
+    }
+
+    /// 把持有这份列表的那扇窗口叫到最前面。
+    private func bringToFront(_ env: AppEnvironment) {
+        guard let window = env.hostWindow else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     func takePending() -> [URL] {

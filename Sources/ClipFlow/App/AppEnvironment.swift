@@ -67,6 +67,9 @@ final class AppEnvironment {
         }
     }
 
+    /// 本列表所在的那扇窗口。打开文件时要把它叫到最前面，否则文件会落在后面一扇。
+    @ObservationIgnored weak var hostWindow: NSWindow?
+
     @ObservationIgnored private let folderWatcher = FolderWatcher()
     @ObservationIgnored private var folderGeneration = 0
     @ObservationIgnored private var folderRoots: [URL] = []
