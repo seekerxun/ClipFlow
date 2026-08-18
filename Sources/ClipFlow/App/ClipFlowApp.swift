@@ -58,12 +58,12 @@ private struct WindowRoot: View {
         MainView()
             .environment(environment)
             .preferredColorScheme(.dark)
+            // 标题交给 SwiftUI 自己写。早先是绕过它直接改窗口，但 SwiftUI 之后
+            // 还会按场景再写一遍，把文件名盖回应用名，于是标题时对时不对。
+            .navigationTitle(environment.selectedItem?.name ?? "片巡")
             .focusedSceneValue(\.clipFlowEnvironment, environment)
             .background {
-                WindowTitleSync(
-                    title: environment.selectedItem?.name ?? "片巡",
-                    fileURL: environment.selectedItem?.url
-                )
+                WindowTitleSync(fileURL: environment.selectedItem?.url)
                 WindowCloseObserver { window in
                     environment.hostWindow = window
                 } onClose: {
@@ -202,22 +202,44 @@ private final class WindowObserverView: NSView {
     }
 }
 
-/// 窗口标题用正在播的文件名，Dock 右键才能分清多扇窗口。
+/// 标题栏上的文件图标（`representedURL`）和窗口本身的外观。
+/// 标题文字不在这里写，交给 SwiftUI 的 `navigationTitle`。
 private struct WindowTitleSync: NSViewRepresentable {
-    var title: String
     var fileURL: URL?
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
+    func makeNSView(context: Context) -> TitleSyncView {
+        let view = TitleSyncView()
         view.isHidden = true
+        view.apply(fileURL: fileURL)
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            guard let window = nsView.window else { return }
-            window.title = title
-            window.representedURL = fileURL
+    func updateNSView(_ nsView: TitleSyncView, context: Context) {
+        nsView.apply(fileURL: fileURL)
+    }
+}
+
+/// 记住要写的窗口外观，等真的挂进窗口再写。
+///
+/// 之前这里是「取不到窗口就算了」：视图刚建出来还没挂进窗口，这一趟就被丢掉，
+/// 而选中项此后不再变化，也就没有下一趟，这一份设置于是永远补不上。
+private final class TitleSyncView: NSView {
+    private var fileURL: URL?
+
+    func apply(fileURL: URL?) {
+        self.fileURL = fileURL
+        push()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        push()
+    }
+
+    private func push() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            window.representedURL = self.fileURL
             window.appearance = NSAppearance(named: .darkAqua)
             window.titlebarAppearsTransparent = true
             window.styleMask.insert(.fullSizeContentView)
@@ -234,7 +256,10 @@ private struct ClipFlowCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
-        CommandGroup(replacing: .newItem) {
+        // 菜单比窗口先建好，这里顺手把「开一扇新窗口」的能力交给 `SessionHub`，
+        // 让它在一扇窗口都没有的时候也能开出第一扇。
+        let _ = SessionHub.shared.captureMainOpener { openWindow(id: "main") }
+        return CommandGroup(replacing: .newItem) {
             Button("新建窗口") {
                 openWindow(id: "main")
             }
@@ -272,6 +297,47 @@ private struct ClipFlowCommands: Commands {
 }
 
 final class ClipFlowAppDelegate: NSObject, NSApplicationDelegate {
+    /// 系统送「打开文件」时是一个文件一条事件，而 AppKit 默认的处理会为每条事件
+    /// 各开一扇窗口。一次选中 20 个文件一起打开，就会弹出 20 扇窗口，每扇都自带
+    /// 一套播放实例，机器直接被拖垮。这里把这条事件接管过来自己处理，
+    /// AppKit 那套「一个文件一扇窗」的默认动作就不会再执行。
+    ///
+    /// 必须在 `applicationWillFinishLaunching` 里装，晚于这个时机 AppKit 已经
+    /// 把自己的处理挂上去并开始收事件了。
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleOpenDocuments(_:withReply:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEOpenDocuments)
+        )
+    }
+
+    /// 事件在主线程送达，因此可以直接进主线程隔离的 `SessionHub`。
+    @objc func handleOpenDocuments(_ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor) {
+        let urls = Self.fileURLs(from: event)
+        guard !urls.isEmpty else { return }
+        MainActor.assumeIsolated {
+            SessionHub.shared.open(urls)
+        }
+    }
+
+    private static func fileURLs(from event: NSAppleEventDescriptor) -> [URL] {
+        guard let direct = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject)) else { return [] }
+        // 单个文件时直接对象就是文件本身，多个文件时才是一个列表。
+        if direct.numberOfItems > 0 {
+            return (1...direct.numberOfItems).compactMap { direct.atIndex($0).flatMap(url(from:)) }
+        }
+        return [url(from: direct)].compactMap { $0 }
+    }
+
+    private static func url(from descriptor: NSAppleEventDescriptor) -> URL? {
+        guard let coerced = descriptor.coerce(toDescriptorType: typeFileURL) else { return nil }
+        return URL(dataRepresentation: coerced.data, relativeTo: nil)
+    }
+
+    /// 接管事件后系统不会再走这条回调，留着只是兜底：万一某条路径仍从这里进来，
+    /// 也会汇进同一个入口，`SessionHub` 会把重复的文件去掉。
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
             SessionHub.shared.open(urls)
@@ -285,12 +351,22 @@ final class SessionHub {
     static let shared = SessionHub()
 
     var openNewWindow: (([URL]) -> Void)?
+    /// 一扇窗口都没有的时候用它开出第一扇。菜单在启动时就建好了，
+    /// 因此这个闭包比任何窗口都早拿到手。
+    private var openMainWindow: (() -> Void)?
     /// 字典的遍历顺序是不确定的，直接 `sessions.values.first` 会把文件随机丢给
     /// 某一扇窗口——有时正好是屏幕上那扇，有时是别的，于是同一个操作时灵时不灵。
     /// 这里按注册先后记一份顺序，永远优先最早注册的那个（就是主窗口）。
     private var order: [ObjectIdentifier] = []
     private var sessions: [ObjectIdentifier: AppEnvironment] = [:]
     private var pending: [URL] = []
+
+    /// 一次「打开多个文件」会被系统拆成好几条事件陆续送来。逐条处理的话，
+    /// 每条都会各自去找窗口，最后开出好几扇。先把一小段时间内送到的文件攒成一批，
+    /// 再统一决定放进哪扇窗口。
+    private var batch: [URL] = []
+    private var batchTask: Task<Void, Never>?
+    private static let batchWindow = Duration.milliseconds(250)
 
     private var orderedSessions: [AppEnvironment] {
         order.compactMap { sessions[$0] }
@@ -308,13 +384,36 @@ final class SessionHub {
         order.removeAll { $0 == id }
     }
 
+    func captureMainOpener(_ opener: @escaping () -> Void) {
+        openMainWindow = opener
+    }
+
     func open(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
+        // 同一批里重复的文件只留一份：兜底回调和事件处理可能把同一个文件送两遍。
+        for url in urls where !batch.contains(url) { batch.append(url) }
+        batchTask?.cancel()
+        batchTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.batchWindow)
+            guard !Task.isCancelled else { return }
+            self?.flushBatch()
+        }
+    }
+
+    private func flushBatch() {
+        let urls = batch
+        batch = []
+        batchTask = nil
+        guard !urls.isEmpty else { return }
+        deliver(urls)
+    }
+
+    private func deliver(_ urls: [URL]) {
         if let idle = orderedSessions.first(where: { $0.items.isEmpty }) {
             Task {
                 await idle.addURLs(urls)
-                // 收下文件的那扇窗口未必在最前面（系统可能刚替我们又开了一扇空窗）。
-                // 不提到前面的话，用户看到的是一扇空窗，文件像是没打开。
+                // 收下文件的那扇窗口未必在最前面。不提到前面的话，
+                // 用户看到的是一扇空窗，文件像是没打开。
                 bringToFront(idle)
             }
             return
@@ -323,7 +422,9 @@ final class SessionHub {
             openNewWindow(urls)
             return
         }
+        // 一扇窗口都没有：文件先存着，等新窗口起来自己来取。
         pending.append(contentsOf: urls)
+        openMainWindow?()
     }
 
     /// 把持有这份列表的那扇窗口叫到最前面。
