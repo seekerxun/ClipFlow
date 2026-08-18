@@ -94,7 +94,8 @@ final class AppEnvironment {
     }
 
     init() {
-        let index = MediaIndex()
+        // 索引全应用共用一份，不跟着窗口走。见 `MediaIndex.shared`。
+        let index = MediaIndex.shared
         self.index = index
         let startFraction = (UserDefaults.standard.object(forKey: "coverStartFraction") as? Double)
             ?? CoverPicker.defaultStartFraction

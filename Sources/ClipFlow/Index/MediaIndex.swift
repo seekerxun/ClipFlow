@@ -6,8 +6,20 @@ import Foundation
 /// 真到几万条再换数据库。一上来就上 Core Data 是过度设计。
 actor MediaIndex {
 
+    /// 全应用共用这一个索引。
+    ///
+    /// 索引是按文件摘要组织的整机素材缓存，本来就不属于某一扇窗口。每扇窗口各建一个的话，
+    /// 每个都攥着自己创建那一刻的快照，落盘又是整份覆盖，于是谁后写谁说了算：
+    /// 另一扇窗口这期间新建的记录会被整份抹掉。多窗口能正常播放之后这条路径才真正被走到，
+    /// 表现就是索引莫名其妙变少。
+    static let shared = MediaIndex()
+
     private var file = IndexFile()
     private var unsavedCount = 0
+
+    /// 本次运行里主动删掉的摘要。落盘合并时要按它把磁盘上的旧条目一并去掉，
+    /// 否则合并会把刚删的记录又捡回来。
+    private var removedDigests: Set<String> = []
 
     let fileURL: URL
 
@@ -42,6 +54,10 @@ actor MediaIndex {
     // MARK: - 载入 / 保存
 
     func load() {
+        // 共用一个实例之后，每扇窗口起来都会各调一次 load。第二次再照着磁盘重读一遍，
+        // 会把前一扇窗口刚做好、还没落盘的记录整份冲掉。载入只做第一次。
+        guard !hasLoaded else { return }
+
         var report = LoadReport()
         defer {
             lastLoadReport = report
@@ -52,8 +68,12 @@ actor MediaIndex {
 
         var loaded: IndexFile
         if let decoded = try? JSONDecoder().decode(IndexFile.self, from: data) {
-            // 比当前版本新的文件不认识，按空索引处理，也不要拿它去猜结构
-            guard decoded.version <= IndexFile.currentVersion else { return }
+            // 比当前版本新的文件不认识，按空索引处理，也不要拿它去猜结构。
+            // 但后面的 save 会把它盖掉，所以先留一份备份再撒手。
+            guard decoded.version <= IndexFile.currentVersion else {
+                Self.backUpUnreadable(at: fileURL)
+                return
+            }
             loaded = decoded
         } else if let salvage = Self.salvageRecords(from: data) {
             // 整份解不出来时绝不能当成「没有索引」——那等于把用户攒下的缓存
@@ -112,19 +132,54 @@ actor MediaIndex {
     }
 
     func save() throws {
+        let exists = FileManager.default.fileExists(atPath: fileURL.path(percentEncoded: false))
+
         // 启动期是有竞态的：`AppEnvironment` 把 load 丢进 Task，而空队列的
         // ThumbnailQueue 会立刻 save 一次。save 先跑完的话，用户攒了几千条的索引
         // 会被内存里那份空的整份覆盖掉。没 load 过就不许盖已有文件。
-        guard hasLoaded || !FileManager.default.fileExists(
-            atPath: fileURL.path(percentEncoded: false)
-        ) else { return }
+        guard hasLoaded || !exists else { return }
+
+        // 没有任何待写的改动就别动这个文件。界面每滚一下都会顺手 save 一次，
+        // 这里挡掉的是纯粹的重复重写。
+        guard unsavedCount > 0 || !exists else { return }
 
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
+        file = mergedWithDisk()
         let data = try JSONEncoder().encode(file)
         try data.write(to: fileURL, options: .atomic)
         unsavedCount = 0
+        removedDigests.removeAll()
+    }
+
+    /// 落盘前先把磁盘上那份合进来，只增改自己知道的，绝不删自己不知道的。
+    ///
+    /// 每次 save 都是整份覆盖，因此只要有第二个写入方（另一个进程、手工改过的文件，
+    /// 或者哪天又有人给某个模块单开一份索引），内存里没见过的记录就会被整份抹掉。
+    /// 合并之后，「盖掉一条自己从没听说过的记录」这件事在结构上就不可能发生了。
+    ///
+    /// 两边都有的记录以内存为准：写的人就是刚干完活的那个，它手上那份最新。
+    private func mergedWithDisk() -> IndexFile {
+        guard let data = try? Data(contentsOf: fileURL) else { return file }
+
+        let onDisk: [String: IndexRecord]
+        if let decoded = try? JSONDecoder().decode(IndexFile.self, from: data) {
+            // 认不出的新版本不合并，也不猜它的结构；load 已经给它留过备份
+            guard decoded.version <= IndexFile.currentVersion else { return file }
+            onDisk = decoded.records
+        } else if let salvage = Self.salvageRecords(from: data) {
+            onDisk = salvage.records
+        } else {
+            return file
+        }
+
+        var merged = file
+        for (digest, record) in onDisk
+        where merged.records[digest] == nil && !removedDigests.contains(digest) {
+            merged.records[digest] = record
+        }
+        return merged
     }
 
     /// 攒够一批再落盘。每条都写的话，1000 个文件就是 1000 次整份 JSON 重写。
@@ -144,11 +199,13 @@ actor MediaIndex {
 
     func upsert(_ record: IndexRecord) {
         file.records[record.key.digest] = record
+        removedDigests.remove(record.key.digest)
         unsavedCount += 1
     }
 
     func remove(digest: String) {
         file.records.removeValue(forKey: digest)
+        removedDigests.insert(digest)
         unsavedCount += 1
     }
 
@@ -180,6 +237,7 @@ actor MediaIndex {
         for (digest, record) in file.records
         where !fm.fileExists(atPath: record.key.path) {
             file.records.removeValue(forKey: digest)
+            removedDigests.insert(digest)
             unsavedCount += 1
         }
     }
