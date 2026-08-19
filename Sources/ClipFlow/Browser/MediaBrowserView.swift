@@ -42,8 +42,12 @@ struct MediaBrowserView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("素材")
-                .font(.system(size: 14, weight: .semibold))
+            Image(systemName: "film.stack")
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: 20, height: 20)
+                .help("素材：\(env.items.count) 个视频")
+                .accessibilityLabel("素材")
+                .accessibilityValue("\(env.items.count) 个视频")
             countBadge
             Spacer(minLength: 0)
             Button {
@@ -138,37 +142,52 @@ struct MediaBrowserView: View {
     }
 
     private var sortBar: some View {
-        return HStack(spacing: 6) {
+        HStack(spacing: 0) {
             Menu {
-                ForEach(BrowserSort.allCases) { item in
-                    Button(item.title) {
-                        env.sort = item
+                Section("排序字段") {
+                    ForEach(BrowserSort.allCases) { item in
+                        Button {
+                            env.sort = item
+                        } label: {
+                            if env.sort == item {
+                                Label(item.title, systemImage: "checkmark")
+                            } else {
+                                Text(item.title)
+                            }
+                        }
+                    }
+                }
+                Section("排序方向") {
+                    Button {
+                        env.sortAscending = true
+                    } label: {
+                        if env.sortAscending {
+                            Label("正序", systemImage: "checkmark")
+                        } else {
+                            Text("正序")
+                        }
+                    }
+                    Button {
+                        env.sortAscending = false
+                    } label: {
+                        if !env.sortAscending {
+                            Label("反序", systemImage: "checkmark")
+                        } else {
+                            Text("反序")
+                        }
                     }
                 }
             } label: {
-                Text(env.sort.title)
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 20, height: 18)
             }
             .menuStyle(.borderlessButton)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .help("排序")
+            .help("排序：\(env.sort.title)，\(env.sortAscending ? "正序" : "反序")")
             .accessibilityLabel("排序")
-            Button {
-                env.sortAscending.toggle()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: env.sortAscending ? "arrow.up" : "arrow.down")
-                    Text(env.sortAscending ? "正序" : "反序")
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .medium))
-                }
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .fixedSize()
-            .focusable(false)
-            .help("切换正序 / 反序")
-            .accessibilityLabel(env.sortAscending ? "正序" : "反序")
-            .accessibilityHint("切换排序方向")
+            .accessibilityValue("\(env.sort.title)，\(env.sortAscending ? "正序" : "反序")")
+            .accessibilityHint("选择排序字段和方向")
+            Spacer(minLength: 0)
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundStyle(.secondary)
