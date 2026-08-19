@@ -325,7 +325,13 @@ private final class TitleSyncView: NSView {
         }
 
         let symbol = browserOnRight ? "sidebar.right" : "sidebar.left"
+        let symbolConfiguration = NSImage.SymbolConfiguration(hierarchicalColor: .labelColor)
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "显示素材浏览区")
+        if let image = button.image {
+            button.image = image.withSymbolConfiguration(symbolConfiguration)
+        }
+        // 图像本身带动态标签色，避免模板按钮把它回退为默认强调色。
+        button.image?.isTemplate = false
     }
 
     private func removeSidebarAccessory(from window: NSWindow) {
