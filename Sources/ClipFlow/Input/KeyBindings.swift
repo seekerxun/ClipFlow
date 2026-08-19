@@ -9,6 +9,11 @@ import SwiftUI
 /// 避免被系统拿去切焦点。
 enum KeyBindings {
 
+    /// 文本编辑期间不截获裸字母、Space 或 Tab，让搜索和其他输入控件照常收字。
+    static func isTextInput(_ responder: NSResponder?) -> Bool {
+        responder is NSTextView || responder is NSTextField
+    }
+
     /// 处理一次按键。吞掉返回 true。`Cmd+W` / `Cmd+S` / `Cmd+O` 不占用。
     @MainActor
     static func handle(_ event: NSEvent, env: AppEnvironment) -> Bool {
@@ -348,8 +353,7 @@ final class ClipFlowKeyView: NSView {
     }
 
     private func isEditingText(in window: NSWindow) -> Bool {
-        let first = window.firstResponder
-        return first is NSTextView || first is NSTextField
+        KeyBindings.isTextInput(window.firstResponder)
     }
 
     private func isClickOnTextInput(_ event: NSEvent, in window: NSWindow) -> Bool {

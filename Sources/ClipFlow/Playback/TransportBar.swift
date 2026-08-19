@@ -1,5 +1,25 @@
 import SwiftUI
 
+/// 控制条只留下播放、音量、倍速、循环和逐帧时必要的前后帧按钮。
+/// 模式切换与全屏归到菜单，避免主界面重复入口。
+enum TransportControl: Hashable {
+    case playPause
+    case frameBackward
+    case frameForward
+    case mute
+    case volume
+    case speed
+    case loop
+
+    static func visible(isFrameStepMode: Bool) -> Set<TransportControl> {
+        var controls: Set<TransportControl> = [.playPause, .mute, .volume, .speed, .loop]
+        if isFrameStepMode {
+            controls.formUnion([.frameBackward, .frameForward])
+        }
+        return controls
+    }
+}
+
 /// 播放控制条：播放/暂停、进度、音量/静音、倍速、循环。进度条 hover 读精灵图预览。
 struct TransportBar: View {
     var controller: PlaybackController
@@ -17,6 +37,7 @@ struct TransportBar: View {
     @State private var coverImage: NSImage?
 
     var body: some View {
+        let visibleControls = TransportControl.visible(isFrameStepMode: controller.isFrameStepMode)
         HStack(spacing: 10) {
             Button {
                 controller.togglePlayPause()
@@ -31,8 +52,10 @@ struct TransportBar: View {
             .focusable(false)
             .help(playPauseHelp)
 
-            if controller.isFrameStepMode {
+            if visibleControls.contains(.frameBackward) {
                 frameStepButton(symbol: "backward.frame.fill", delta: -1, help: "上一帧（A / ←）")
+            }
+            if visibleControls.contains(.frameForward) {
                 frameStepButton(symbol: "forward.frame.fill", delta: 1, help: "下一帧（D / →）")
             }
 
@@ -82,18 +105,6 @@ struct TransportBar: View {
             .help("倍速")
 
             Button {
-                env.toggleFrameStepMode()
-            } label: {
-                Image(systemName: "film")
-                    .foregroundStyle(controller.isFrameStepMode ? Color.accentColor : .secondary)
-                    .frame(width: 30, height: 30)
-                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .help(controller.isFrameStepMode ? "退出逐帧模式（G）" : "逐帧模式（G）")
-
-            Button {
                 controller.cycleLoopMode()
             } label: {
                 Image(systemName: controller.loopMode.symbolName)
@@ -104,17 +115,6 @@ struct TransportBar: View {
             .buttonStyle(.plain)
             .focusable(false)
             .help(controller.loopMode.title)
-
-            Button {
-                controller.toggleFullscreen()
-            } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .frame(width: 30, height: 30)
-                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .help("全屏")
         }
         .frame(minHeight: 42)
         .transaction { $0.animation = nil }

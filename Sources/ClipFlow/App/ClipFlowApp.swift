@@ -361,12 +361,27 @@ private struct ClipFlowCommands: Commands {
             }
             .keyboardShortcut("o", modifiers: .command)
         }
+        CommandMenu("播放") {
+            Button(env?.playback.isPaused == false ? "暂停" : "播放") {
+                env?.playback.togglePlayPause()
+            }
+            .keyboardShortcut(" ", modifiers: [])
+            .disabled(env == nil)
+
+            Divider()
+
+            Toggle("逐帧模式", isOn: Binding(
+                get: { env?.playback.isFrameStepMode ?? false },
+                set: { _ in env?.toggleFrameStepMode() }
+            ))
+            .keyboardShortcut("g", modifiers: [])
+            .disabled(env == nil)
+        }
         CommandGroup(after: .sidebar) {
-            // Tab 由窗口收键处理（README 第 8 节），不在这里绑快捷键，
-            // 以免和系统切焦点或收键各触发一次。
             Button(env?.isBrowserVisible == true ? "隐藏素材浏览区" : "显示素材浏览区") {
                 env?.isBrowserVisible.toggle()
             }
+            .keyboardShortcut(.tab, modifiers: [])
             .disabled(env == nil)
             Button("素材浏览区在左侧") {
                 env?.browserOnRight = false
@@ -379,10 +394,10 @@ private struct ClipFlowCommands: Commands {
             }
             .disabled(env == nil)
             Divider()
-            // G 同样由窗口收键处理，这里不再绑快捷键。
-            Button(env?.playback.isFrameStepMode == true ? "退出逐帧模式" : "逐帧模式") {
-                env?.toggleFrameStepMode()
+            Button("全屏") {
+                env?.playback.toggleFullscreen()
             }
+            .keyboardShortcut("f", modifiers: [])
             .disabled(env == nil)
             Divider()
             Button("搜索素材") {
