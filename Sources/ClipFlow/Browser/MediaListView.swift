@@ -23,6 +23,9 @@ struct MediaListView: View {
                     }
                 }
                 .padding(8)
+                .background {
+                    LightweightScrollerStyle()
+                }
             }
             .scrollContentBackground(.hidden)
             .background(Color.clear)
