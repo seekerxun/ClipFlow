@@ -656,7 +656,14 @@ final class AppEnvironment {
         case .single:
             break
         case .playlist:
-            selectOffset(1, wrap: true)
+            let list = displayedItems
+            if list.count == 1, list[0].id == selectedID, playback.isLoaded {
+                // 只有一条时“下一条”仍是自己，不能走重复选中的空操作。
+                // 重新载入与正常换下一条走同一路径，避免片尾 pause 晚到并盖掉 play。
+                playback.loadFile(list[0].url)
+            } else {
+                selectOffset(1, wrap: true)
+            }
         case .off:
             selectOffset(1, wrap: false)
         }
