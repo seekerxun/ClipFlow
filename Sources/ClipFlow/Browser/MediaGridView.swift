@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 网格模式。一屏大约 40–60 个方形缩略图；悬停扫过复用 `MediaItemView`。
@@ -16,13 +17,15 @@ struct MediaGridView: View {
                             MediaItemView(
                                 item: item,
                                 record: env.records[item.id],
-                                isSelected: item.id == env.selectedID,
+                                isSelected: env.selectedIDs.contains(item.id),
                                 layout: .grid
                             )
                             .aspectRatio(1, contentMode: .fit)
                             .id(item.id)
                             .contentShape(Rectangle())
-                            .onTapGesture { env.select(item) }
+                            .onTapGesture {
+                                env.selectFromBrowser(item, modifiers: NSEvent.modifierFlags)
+                            }
                             .onDrag { item.fileDragProvider }
                             .onAppear { env.thumbnails.appear(id: item.id) }
                             .onDisappear { env.thumbnails.disappear(id: item.id) }

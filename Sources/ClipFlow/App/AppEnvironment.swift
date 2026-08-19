@@ -38,6 +38,7 @@ final class AppEnvironment {
 
     var items: [MediaItem] = []
     var selectedID: String?
+    var selectedIDs: Set<String> = []
     var records: [String: IndexRecord] = [:]
     var skippedCount = 0
     var isBrowserVisible = true
@@ -74,6 +75,9 @@ final class AppEnvironment {
     @ObservationIgnored private var folderGeneration = 0
     @ObservationIgnored private var folderRoots: [URL] = []
     @ObservationIgnored private var looseFiles: [URL] = []
+    /// 从列表手动移除的路径。目录监听再次扫描时继续排除；用户重新加入来源时解除。
+    @ObservationIgnored private var excludedPaths: Set<String> = []
+    @ObservationIgnored private var selectionAnchorID: String?
     @ObservationIgnored private var sourceTask: Task<Void, Never>?
     @ObservationIgnored private var frameTimelineTask: Task<Void, Never>?
 
@@ -169,6 +173,8 @@ final class AppEnvironment {
             MediaScanner.collect(from: urls)
         }.value
         recordSources(from: urls)
+        // 明确重新加入文件或文件夹，等于撤销此前的“移除列表”。
+        excludedPaths.subtract(result.items.map(\.key.path))
         await appendItems(result.items)
         startWatchingCurrentRoots()
         Task {
@@ -262,13 +268,14 @@ final class AppEnvironment {
     }
 
     private func applyIncrementalScan(_ result: MediaScanner.Result) async {
+        let scannedItems = result.items.filter { !excludedPaths.contains($0.key.path) }
         let oldIDs = Set(items.map(\.id))
-        let newIDs = Set(result.items.map(\.id))
+        let newIDs = Set(scannedItems.map(\.id))
         if oldIDs == newIDs, skippedCount == result.skippedCount {
             return
         }
 
-        let added = result.items.filter { !oldIDs.contains($0.id) }
+        let added = scannedItems.filter { !oldIDs.contains($0.id) }
         var recs = records
         for id in oldIDs where !newIDs.contains(id) {
             recs.removeValue(forKey: id)
@@ -281,10 +288,11 @@ final class AppEnvironment {
 
         let wasEmpty = items.isEmpty
         let previousSelected = selectedID
-        items = result.items
+        items = scannedItems
         skippedCount = result.skippedCount
         records = recs
         thumbnails.sync(items: sortedItems, records: recs)
+        selectedIDs.formIntersection(newIDs)
 
         if let previousSelected, newIDs.contains(previousSelected) {
             return
@@ -380,6 +388,57 @@ final class AppEnvironment {
     // MARK: - 选中即播
 
     func select(_ item: MediaItem, scroll: Bool = false) {
+        selectedIDs = [item.id]
+        selectionAnchorID = item.id
+        playSelection(item, scroll: scroll)
+    }
+
+    /// 列表点击：普通点击单选，Command 增减单项，Shift 按当前排序连续选择。
+    func selectFromBrowser(_ item: MediaItem, modifiers: NSEvent.ModifierFlags) {
+        let mods = modifiers.intersection(.deviceIndependentFlagsMask)
+        let isCommand = mods.contains(.command)
+        let isShift = mods.contains(.shift)
+
+        if isShift {
+            selectRange(to: item, additive: isCommand)
+            playSelection(item)
+            return
+        }
+
+        if isCommand {
+            if selectedIDs.contains(item.id) {
+                selectedIDs.remove(item.id)
+            } else {
+                selectedIDs.insert(item.id)
+                playSelection(item)
+            }
+            if selectionAnchorID == nil {
+                selectionAnchorID = item.id
+            }
+            return
+        }
+
+        select(item)
+    }
+
+    private func selectRange(to item: MediaItem, additive: Bool) {
+        let list = displayedItems
+        guard let targetIndex = list.firstIndex(where: { $0.id == item.id }) else { return }
+        let anchorID = selectionAnchorID ?? selectedID ?? item.id
+        let anchorIndex = list.firstIndex(where: { $0.id == anchorID }) ?? targetIndex
+        let bounds = min(anchorIndex, targetIndex)...max(anchorIndex, targetIndex)
+        let rangeIDs = Set(bounds.map { list[$0].id })
+        if additive {
+            selectedIDs.formUnion(rangeIDs)
+        } else {
+            selectedIDs = rangeIDs
+        }
+        if selectionAnchorID == nil {
+            selectionAnchorID = anchorID
+        }
+    }
+
+    private func playSelection(_ item: MediaItem, scroll: Bool = false) {
         if selectedID == item.id {
             if playback.isPaused { playback.play() }
             return
@@ -387,6 +446,104 @@ final class AppEnvironment {
         selectedID = item.id
         shouldScrollToSelection = scroll
         playback.loadFile(item.url)
+    }
+
+    /// 右键点在已选项上时操作整组；点在未选项上时只操作鼠标下这一项。
+    func contextActionIDs(for item: MediaItem) -> Set<String> {
+        selectedIDs.contains(item.id) ? selectedIDs : [item.id]
+    }
+
+    func revealInFinder(_ item: MediaItem) {
+        NSWorkspace.shared.activateFileViewerSelecting([item.url])
+    }
+
+    func removeSelectedItemsFromList() {
+        removeItemsFromList(ids: selectedIDs)
+    }
+
+    func removeItemsFromList(ids: Set<String>) {
+        let existingIDs = Set(items.map(\.id))
+        let targets = ids.intersection(existingIDs)
+        guard !targets.isEmpty else { return }
+
+        let oldDisplayedItems = displayedItems
+        let previousSelectedID = selectedID
+        let removedItems = items.filter { targets.contains($0.id) }
+        excludedPaths.formUnion(removedItems.map(\.key.path))
+        let removedPaths = Set(removedItems.map(\.key.path))
+        looseFiles.removeAll { removedPaths.contains($0.path(percentEncoded: false)) }
+
+        items.removeAll { targets.contains($0.id) }
+        for id in targets {
+            records.removeValue(forKey: id)
+        }
+        selectedIDs.subtract(targets)
+        thumbnails.sync(items: sortedItems, records: records)
+
+        guard let previousSelectedID, targets.contains(previousSelectedID) else { return }
+        selectedID = nil
+        playback.pause()
+
+        let oldIndex = oldDisplayedItems.firstIndex { $0.id == previousSelectedID }
+        let nextItem = oldIndex.flatMap { index in
+            oldDisplayedItems.suffix(from: oldDisplayedItems.index(after: index))
+                .first { !targets.contains($0.id) }
+                ?? oldDisplayedItems[..<index].reversed().first { !targets.contains($0.id) }
+        } ?? displayedItems.first
+
+        if let nextItem {
+            select(nextItem)
+        } else {
+            selectionAnchorID = nil
+        }
+    }
+
+    func deleteSelectedItems() {
+        deleteItems(ids: selectedIDs)
+    }
+
+    /// “删除”采用移到废纸篓；失败的文件保留在列表，避免用户误以为已经删掉。
+    func deleteItems(ids: Set<String>) {
+        let targets = items.filter { ids.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        let files = targets.map { (id: $0.id, url: $0.url) }
+
+        Task { @MainActor in
+            let result = await Task.detached {
+                var deletedIDs: Set<String> = []
+                var failures: [String] = []
+                for file in files {
+                    do {
+                        _ = try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
+                        deletedIDs.insert(file.id)
+                    } catch {
+                        failures.append("\(file.url.lastPathComponent)：\(error.localizedDescription)")
+                    }
+                }
+                return (deletedIDs, failures)
+            }.value
+
+            removeItemsFromList(ids: result.0)
+            if !result.1.isEmpty {
+                presentDeletionFailures(result.1)
+            }
+        }
+    }
+
+    private func presentDeletionFailures(_ failures: [String]) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = failures.count == 1 ? "无法删除视频" : "部分视频无法删除"
+        alert.informativeText = failures.prefix(5).joined(separator: "\n")
+        if failures.count > 5 {
+            alert.informativeText += "\n另有 \(failures.count - 5) 个文件失败"
+        }
+        alert.addButton(withTitle: "好")
+        if let hostWindow {
+            alert.beginSheetModal(for: hostWindow)
+        } else {
+            alert.runModal()
+        }
     }
 
     // MARK: - 逐帧

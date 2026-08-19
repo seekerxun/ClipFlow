@@ -48,6 +48,11 @@ enum KeyBindings {
         case 121: // pageDown
             env.selectOffset(1, wrap: false)
             return true
+        case 51, 117: // Delete / Forward Delete
+            if mods.contains(.shift) {
+                return once(event) { env.deleteSelectedItems() }
+            }
+            return once(event) { env.removeSelectedItemsFromList() }
         case 48: // tab：显示 / 隐藏素材浏览区，不交给系统切焦点
             return once(event) { env.isBrowserVisible.toggle() }
         case 33: // [
