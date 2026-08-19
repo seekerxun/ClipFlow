@@ -39,6 +39,20 @@ final class PlaybackCommandTests: XCTestCase {
         XCTAssertEqual(controller.currentTime, 0)
         XCTAssertEqual(controller.duration, 0)
     }
+
+    func testVideoRotationCyclesClockwiseBackToZero() {
+        let controller = PlaybackController()
+
+        XCTAssertEqual(controller.videoRotationDegrees, 0)
+        controller.rotateVideoClockwise()
+        XCTAssertEqual(controller.videoRotationDegrees, 90)
+        controller.rotateVideoClockwise()
+        XCTAssertEqual(controller.videoRotationDegrees, 180)
+        controller.rotateVideoClockwise()
+        XCTAssertEqual(controller.videoRotationDegrees, 270)
+        controller.rotateVideoClockwise()
+        XCTAssertEqual(controller.videoRotationDegrees, 0)
+    }
 }
 
 private final class ImmediateReadyBackend: MPVRenderBackend {

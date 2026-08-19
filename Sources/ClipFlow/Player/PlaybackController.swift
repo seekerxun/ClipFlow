@@ -82,6 +82,7 @@ final class PlaybackController {
     private(set) var volume: Double = 100
     private(set) var speed: Double = 1
     private(set) var videoAspectRatio: VideoAspectRatioPreset = .original
+    private(set) var videoRotationDegrees: Int = 0
     private(set) var loopMode: LoopMode = .off
     /// 片段循环起点。只按当前播放时间设，不跟进度条点击走。
     private(set) var loopA: Double?
@@ -166,11 +167,12 @@ final class PlaybackController {
         if fullscreenObservers.isEmpty {
             observeFullscreen()
         }
-        // 重建出来的实例是全新的，界面上已有的音量 / 静音 / 倍速要重新交代一遍。
+        // 重建出来的实例是全新的，界面上已有的播放设置要重新交代一遍。
         mpv.setDouble("volume", volume)
         mpv.setFlag("mute", isMuted)
         mpv.setDouble("speed", speed)
         mpv.setString("video-aspect-override", videoAspectRatio.mpvValue)
+        mpv.setString("video-rotate", String(videoRotationDegrees))
         applyLoopFileOption()
         applyFrameStepOptions()
         return true
@@ -435,6 +437,12 @@ final class PlaybackController {
     func setVideoAspectRatio(_ preset: VideoAspectRatioPreset) {
         videoAspectRatio = preset
         mpv.setString("video-aspect-override", preset.mpvValue)
+    }
+
+    /// 每次顺时针旋转 90°，转满一圈后回到原角度。
+    func rotateVideoClockwise() {
+        videoRotationDegrees = (videoRotationDegrees + 90) % 360
+        mpv.setString("video-rotate", String(videoRotationDegrees))
     }
 
     func setLoopMode(_ mode: LoopMode) {
