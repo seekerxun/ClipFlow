@@ -2,6 +2,39 @@ import AppKit
 import Foundation
 import Observation
 
+/// 画面显示比例。只覆盖显示时使用的宽高比，不改源文件，也不插入滤镜。
+enum VideoAspectRatioPreset: String, CaseIterable, Sendable {
+    case original
+    case square
+    case fourThree
+    case threeTwo
+    case sixteenNine
+    case nineSixteen
+
+    var title: String {
+        switch self {
+        case .original: return "原始"
+        case .square: return "1:1"
+        case .fourThree: return "4:3"
+        case .threeTwo: return "3:2"
+        case .sixteenNine: return "16:9"
+        case .nineSixteen: return "9:16"
+        }
+    }
+
+    /// `no` 恢复素材自身比例；其余值由 mpv 直接覆盖显示比例。
+    var mpvValue: String {
+        switch self {
+        case .original: return "no"
+        case .square: return "1:1"
+        case .fourThree: return "4:3"
+        case .threeTwo: return "3:2"
+        case .sixteenNine: return "16:9"
+        case .nineSixteen: return "9:16"
+        }
+    }
+}
+
 /// 循环模式。单个循环由控制器自己处理；列表循环和自动下一个靠 `onPlaybackEnded`
 /// 通知上层，由界面换选中项。不用 mpv 的 playlist。
 enum LoopMode: Int, CaseIterable, Sendable {
@@ -48,6 +81,7 @@ final class PlaybackController {
     private(set) var isMuted: Bool = false
     private(set) var volume: Double = 100
     private(set) var speed: Double = 1
+    private(set) var videoAspectRatio: VideoAspectRatioPreset = .original
     private(set) var loopMode: LoopMode = .off
     /// 片段循环起点。只按当前播放时间设，不跟进度条点击走。
     private(set) var loopA: Double?
@@ -136,6 +170,7 @@ final class PlaybackController {
         mpv.setDouble("volume", volume)
         mpv.setFlag("mute", isMuted)
         mpv.setDouble("speed", speed)
+        mpv.setString("video-aspect-override", videoAspectRatio.mpvValue)
         applyLoopFileOption()
         applyFrameStepOptions()
         return true
@@ -394,6 +429,12 @@ final class PlaybackController {
             return String(format: "%.0f×", value.rounded())
         }
         return String(format: "%g×", value)
+    }
+
+    /// 动态覆盖画面显示比例。mpv 会直接重绘当前帧，不重新载入文件。
+    func setVideoAspectRatio(_ preset: VideoAspectRatioPreset) {
+        videoAspectRatio = preset
+        mpv.setString("video-aspect-override", preset.mpvValue)
     }
 
     func setLoopMode(_ mode: LoopMode) {

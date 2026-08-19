@@ -148,6 +148,7 @@ V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程。播放已�
 - [x] 所有 mpv 命令走 `mpv_command_async`（同步版本会死锁）
 - [x] 监听 `end-file` 事件驱动自动播放下一个（不用 mpv 的 playlist）
 - [x] 播放 / 暂停 / seek / 音量 / 静音 / 倍速
+- [x] 动态覆盖显示比例：原始 / 1:1 / 4:3 / 3:2 / 16:9 / 9:16
 - [x] 循环模式：单个循环 / 列表循环 / 关闭
 - [x] 全屏状态 + `toggleFullscreen()` 接到 `NSWindow.toggleFullScreen`（Esc 可退出）；F 和中键用于铺满 / 恢复窗口
 

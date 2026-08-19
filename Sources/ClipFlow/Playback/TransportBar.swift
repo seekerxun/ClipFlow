@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 控制条只留下播放、音量、倍速、循环和逐帧时必要的前后帧按钮。
+/// 控制条只留下播放、音量、倍速、显示比例、循环和逐帧时必要的前后帧按钮。
 /// 模式切换与全屏归到菜单，避免主界面重复入口。
 enum TransportControl: Hashable {
     case playPause
@@ -20,7 +20,7 @@ enum TransportControl: Hashable {
     }
 }
 
-/// 播放控制条：播放/暂停、进度、音量/静音、倍速、循环。进度条 hover 读精灵图预览。
+/// 播放控制条：播放/暂停、进度、音量/静音、倍速、显示比例、循环。进度条 hover 读精灵图预览。
 struct TransportBar: View {
     var controller: PlaybackController
 
@@ -103,6 +103,29 @@ struct TransportBar: View {
             .controlSize(.small)
             .focusable(false)
             .help("倍速")
+
+            Menu {
+                Picker("显示比例", selection: Binding(
+                    get: { controller.videoAspectRatio },
+                    set: { controller.setVideoAspectRatio($0) }
+                )) {
+                    ForEach(VideoAspectRatioPreset.allCases, id: \.self) { preset in
+                        Text(preset.title).tag(preset)
+                    }
+                }
+            } label: {
+                Image(systemName: "aspectratio")
+                    .foregroundStyle(
+                        controller.videoAspectRatio == .original ? .secondary : Color.accentColor
+                    )
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .focusable(false)
+            .help("显示比例：\(controller.videoAspectRatio.title)")
 
             Button {
                 controller.cycleLoopMode()
