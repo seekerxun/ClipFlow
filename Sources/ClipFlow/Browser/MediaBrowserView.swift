@@ -143,6 +143,8 @@ struct MediaBrowserView: View {
 
     private var sortBar: some View {
         HStack(spacing: 0) {
+            Spacer(minLength: 0)
+
             Menu {
                 Section("排序字段") {
                     ForEach(BrowserSort.allCases) { item in
@@ -187,20 +189,13 @@ struct MediaBrowserView: View {
             .accessibilityLabel("排序")
             .accessibilityValue("\(env.sort.title)，\(env.sortAscending ? "正序" : "反序")")
             .accessibilityHint("选择排序字段和方向")
-            Spacer(minLength: 0)
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundStyle(.secondary)
         .padding(.horizontal, 16)
         .frame(height: 28)
-        // 两条线都贴在排序行边缘，不参与布局高度；16pt 内缩与行内控件对齐。
+        // 分隔线贴在排序行顶部，不参与布局高度；16pt 内缩与行内控件对齐。
         .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.white.opacity(0.12))
-                .frame(height: 1)
-                .padding(.horizontal, 16)
-        }
-        .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.white.opacity(0.12))
                 .frame(height: 1)
