@@ -83,6 +83,7 @@ final class PlaybackController {
     private(set) var speed: Double = 1
     private(set) var videoAspectRatio: VideoAspectRatioPreset = .original
     private(set) var videoRotationDegrees: Int = 0
+    private(set) var isHorizontallyFlipped: Bool = false
     private(set) var loopMode: LoopMode = .off
     /// 片段循环起点。只按当前播放时间设，不跟进度条点击走。
     private(set) var loopA: Double?
@@ -173,6 +174,9 @@ final class PlaybackController {
         mpv.setDouble("speed", speed)
         mpv.setString("video-aspect-override", videoAspectRatio.mpvValue)
         mpv.setString("video-rotate", String(videoRotationDegrees))
+        if isHorizontallyFlipped {
+            applyHorizontalFlip()
+        }
         applyLoopFileOption()
         applyFrameStepOptions()
         return true
@@ -443,6 +447,25 @@ final class PlaybackController {
     func rotateVideoClockwise() {
         videoRotationDegrees = (videoRotationDegrees + 90) % 360
         mpv.setString("video-rotate", String(videoRotationDegrees))
+    }
+
+    /// 只增删 ClipFlow 自己的具名滤镜，不覆盖 mpv 中的其他视频滤镜。
+    func setHorizontalFlip(_ enabled: Bool) {
+        guard isHorizontallyFlipped != enabled else { return }
+        isHorizontallyFlipped = enabled
+        applyHorizontalFlip()
+    }
+
+    func toggleHorizontalFlip() {
+        setHorizontalFlip(!isHorizontallyFlipped)
+    }
+
+    private func applyHorizontalFlip() {
+        if isHorizontallyFlipped {
+            mpv.command(["vf", "add", "@clipflow-horizontal-flip:hflip"])
+        } else {
+            mpv.command(["vf", "remove", "@clipflow-horizontal-flip"])
+        }
     }
 
     func setLoopMode(_ mode: LoopMode) {

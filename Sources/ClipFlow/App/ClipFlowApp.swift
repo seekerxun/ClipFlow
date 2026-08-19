@@ -392,6 +392,13 @@ private struct ClipFlowCommands: Commands {
             .keyboardShortcut("r", modifiers: [])
             .disabled(env == nil)
 
+            Toggle("水平翻转", isOn: Binding(
+                get: { env?.playback.isHorizontallyFlipped ?? false },
+                set: { env?.playback.setHorizontalFlip($0) }
+            ))
+            .keyboardShortcut("h", modifiers: [])
+            .disabled(env == nil)
+
             Divider()
 
             Toggle("逐帧模式", isOn: Binding(

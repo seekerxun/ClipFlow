@@ -53,6 +53,16 @@ final class PlaybackCommandTests: XCTestCase {
         controller.rotateVideoClockwise()
         XCTAssertEqual(controller.videoRotationDegrees, 0)
     }
+
+    func testHorizontalFlipCanBeToggledAndSetExplicitly() {
+        let controller = PlaybackController()
+
+        XCTAssertFalse(controller.isHorizontallyFlipped)
+        controller.toggleHorizontalFlip()
+        XCTAssertTrue(controller.isHorizontallyFlipped)
+        controller.setHorizontalFlip(false)
+        XCTAssertFalse(controller.isHorizontallyFlipped)
+    }
 }
 
 private final class ImmediateReadyBackend: MPVRenderBackend {
