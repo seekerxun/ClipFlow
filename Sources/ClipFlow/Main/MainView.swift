@@ -22,6 +22,7 @@ struct MainView: View {
             ZStack {
                 DockGlassBackground()
                 Color.black.opacity(0.13)
+                ChromeTintOverlay()
             }
             .ignoresSafeArea()
         }
@@ -56,9 +57,12 @@ struct MainView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
                 .background {
-                    Rectangle()
-                        .fill(.thinMaterial)
-                        .opacity(0.88)
+                    ZStack {
+                        Rectangle()
+                            .fill(.thinMaterial)
+                            .opacity(0.88)
+                        ChromeTintOverlay(opacity: 0.035)
+                    }
                 }
         }
         .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
@@ -139,6 +143,40 @@ struct MainView: View {
         guard hasFolder || hasVideo else { return false }
         Task { await env.addURLs(urls) }
         return true
+    }
+}
+
+/// 统一覆盖在半透明 chrome 材质上的低饱和色雾；画面内容保持在它的上方。
+private struct ChromeTintOverlay: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+
+    let opacity: Double
+
+    init(opacity: Double = 0.055) {
+        self.opacity = opacity
+    }
+
+    var body: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.05, green: 0.82, blue: 0.92),
+                Color(red: 0.18, green: 0.43, blue: 0.96),
+                Color(red: 0.67, green: 0.25, blue: 0.95),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .opacity(effectiveOpacity)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var effectiveOpacity: Double {
+        guard !reduceTransparency, colorSchemeContrast != .increased else {
+            return min(opacity, 0.035)
+        }
+        return opacity
     }
 }
 
