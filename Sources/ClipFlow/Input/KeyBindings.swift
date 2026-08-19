@@ -79,7 +79,7 @@ enum KeyBindings {
         case "g":
             return once(event) { env.toggleFrameStepMode() }
         case "f":
-            return once(event) { env.playback.toggleFullscreen() }
+            return once(event) { env.playback.toggleWindowZoom() }
         case "l":
             return once(event) { env.playback.cycleLoopMode() }
         case "m":
@@ -397,7 +397,7 @@ struct ClipFlowInputHost: NSViewRepresentable {
     }
 }
 
-/// 根视图挂上：窗口收键、中键全屏。
+/// 根视图挂上：窗口收键、中键全屏；F 键负责铺满 / 恢复窗口。
 struct ClipFlowInputModifier: ViewModifier {
     @Environment(AppEnvironment.self) private var env
 

@@ -459,6 +459,11 @@ final class PlaybackController {
         NSApp.keyWindow?.toggleFullScreen(nil)
     }
 
+    /// 按 macOS 的标准缩放规则在“铺满可用区域”和原窗口大小之间切换。
+    func toggleWindowZoom() {
+        NSApp.keyWindow?.performZoom(nil)
+    }
+
     func exitFullscreen() {
         guard isFullscreen else { return }
         NSApp.keyWindow?.toggleFullScreen(nil)

@@ -400,10 +400,14 @@ private struct ClipFlowCommands: Commands {
             }
             .disabled(env == nil)
             Divider()
+            Button("铺满 / 恢复") {
+                env?.playback.toggleWindowZoom()
+            }
+            .keyboardShortcut("f", modifiers: [])
+            .disabled(env == nil)
             Button("全屏") {
                 env?.playback.toggleFullscreen()
             }
-            .keyboardShortcut("f", modifiers: [])
             .disabled(env == nil)
             Divider()
             Button("搜索素材") {
