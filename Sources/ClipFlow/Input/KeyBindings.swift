@@ -211,7 +211,7 @@ final class ClipFlowKeyView: NSView {
             guard let self else { return event }
             guard event.buttonNumber == 2 else { return event }
             guard self.shouldHandle(in: event.window) else { return event }
-            self.env?.playback.toggleFullscreen()
+            self.env?.playback.toggleWindowZoom()
             return nil
         }) {
             monitors.append(mouseMonitor)
@@ -397,7 +397,7 @@ struct ClipFlowInputHost: NSViewRepresentable {
     }
 }
 
-/// 根视图挂上：窗口收键、中键全屏；F 键负责铺满 / 恢复窗口。
+/// 根视图挂上：窗口收键；F 键和中键负责铺满 / 恢复窗口。
 struct ClipFlowInputModifier: ViewModifier {
     @Environment(AppEnvironment.self) private var env
 
