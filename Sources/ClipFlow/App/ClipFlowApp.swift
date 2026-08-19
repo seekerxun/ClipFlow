@@ -257,6 +257,7 @@ private final class TitleSyncView: NSView {
     private var browserOnRight = false
     private var showBrowser: (() -> Void)?
     private var sidebarAccessory: NSTitlebarAccessoryViewController?
+    private var sidebarButton: NSButton?
 
     func apply(
         fileURL: URL?,
@@ -298,8 +299,8 @@ private final class TitleSyncView: NSView {
         }
 
         let button: NSButton
-        if let existing = sidebarAccessory?.view as? NSButton {
-            button = existing
+        if let sidebarButton {
+            button = sidebarButton
         } else {
             button = NSButton()
             button.bezelStyle = .texturedRounded
@@ -311,9 +312,15 @@ private final class TitleSyncView: NSView {
             button.setAccessibilityIdentifier("show-media-browser")
 
             let accessory = NSTitlebarAccessoryViewController()
-            accessory.view = button
+            // 附件视图右对齐；40pt 容器为按钮右侧保留 12pt 空隙，
+            // 不会向下侵占或撑高标题栏。
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 28))
+            button.frame = NSRect(x: 0, y: 0, width: 28, height: 28)
+            container.addSubview(button)
+            accessory.view = container
             accessory.layoutAttribute = .right
             sidebarAccessory = accessory
+            sidebarButton = button
             window.addTitlebarAccessoryViewController(accessory)
         }
 
@@ -327,6 +334,7 @@ private final class TitleSyncView: NSView {
         else { return }
         window.removeTitlebarAccessoryViewController(at: index)
         self.sidebarAccessory = nil
+        self.sidebarButton = nil
     }
 
     @objc private func showBrowserPane() {
