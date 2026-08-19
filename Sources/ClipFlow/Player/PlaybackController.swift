@@ -450,6 +450,7 @@ final class PlaybackController {
     }
 
     /// 只增删 ClipFlow 自己的具名滤镜，不覆盖 mpv 中的其他视频滤镜。
+    /// 开启时把硬解切到回拷模式，确保软件 hflip 能同时处理硬解和软解视频。
     func setHorizontalFlip(_ enabled: Bool) {
         guard isHorizontallyFlipped != enabled else { return }
         isHorizontallyFlipped = enabled
@@ -462,9 +463,11 @@ final class PlaybackController {
 
     private func applyHorizontalFlip() {
         if isHorizontallyFlipped {
+            mpv.setString("hwdec", "auto-copy-safe")
             mpv.command(["vf", "add", "@clipflow-horizontal-flip:hflip"])
         } else {
             mpv.command(["vf", "remove", "@clipflow-horizontal-flip"])
+            mpv.setString("hwdec", "auto-safe")
         }
     }
 
