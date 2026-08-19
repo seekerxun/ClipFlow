@@ -67,7 +67,12 @@ private struct WindowRoot: View {
             .navigationTitle(environment.selectedItem?.name ?? "片巡")
             .focusedSceneValue(\.clipFlowEnvironment, environment)
             .background {
-                WindowTitleSync(fileURL: environment.selectedItem?.url)
+                WindowTitleSync(
+                    fileURL: environment.selectedItem?.url,
+                    isBrowserVisible: environment.isBrowserVisible,
+                    browserOnRight: environment.browserOnRight,
+                    showBrowser: { environment.isBrowserVisible = true }
+                )
                 WindowCloseObserver { window in
                     environment.hostWindow = window
                 } onClose: {
@@ -216,16 +221,29 @@ private final class WindowObserverView: NSView {
 /// 标题文字不在这里写，交给 SwiftUI 的 `navigationTitle`。
 private struct WindowTitleSync: NSViewRepresentable {
     var fileURL: URL?
+    var isBrowserVisible: Bool
+    var browserOnRight: Bool
+    var showBrowser: () -> Void
 
     func makeNSView(context: Context) -> TitleSyncView {
         let view = TitleSyncView()
         view.isHidden = true
-        view.apply(fileURL: fileURL)
+        view.apply(
+            fileURL: fileURL,
+            isBrowserVisible: isBrowserVisible,
+            browserOnRight: browserOnRight,
+            showBrowser: showBrowser
+        )
         return view
     }
 
     func updateNSView(_ nsView: TitleSyncView, context: Context) {
-        nsView.apply(fileURL: fileURL)
+        nsView.apply(
+            fileURL: fileURL,
+            isBrowserVisible: isBrowserVisible,
+            browserOnRight: browserOnRight,
+            showBrowser: showBrowser
+        )
     }
 }
 
@@ -235,9 +253,21 @@ private struct WindowTitleSync: NSViewRepresentable {
 /// 而选中项此后不再变化，也就没有下一趟，这一份设置于是永远补不上。
 private final class TitleSyncView: NSView {
     private var fileURL: URL?
+    private var isBrowserVisible = true
+    private var browserOnRight = false
+    private var showBrowser: (() -> Void)?
+    private var sidebarAccessory: NSTitlebarAccessoryViewController?
 
-    func apply(fileURL: URL?) {
+    func apply(
+        fileURL: URL?,
+        isBrowserVisible: Bool,
+        browserOnRight: Bool,
+        showBrowser: @escaping () -> Void
+    ) {
         self.fileURL = fileURL
+        self.isBrowserVisible = isBrowserVisible
+        self.browserOnRight = browserOnRight
+        self.showBrowser = showBrowser
         push()
     }
 
@@ -257,7 +287,50 @@ private final class TitleSyncView: NSView {
             // 底色完全交给 MainView 的单层毛玻璃；窗口本身不再叠一层灰黑色。
             window.backgroundColor = .clear
             window.titlebarSeparatorStyle = .none
+            self.updateSidebarAccessory(in: window)
         }
+    }
+
+    private func updateSidebarAccessory(in window: NSWindow) {
+        if isBrowserVisible {
+            removeSidebarAccessory(from: window)
+            return
+        }
+
+        let button: NSButton
+        if let existing = sidebarAccessory?.view as? NSButton {
+            button = existing
+        } else {
+            button = NSButton()
+            button.bezelStyle = .texturedRounded
+            button.target = self
+            button.action = #selector(showBrowserPane)
+            button.setFrameSize(NSSize(width: 28, height: 28))
+            button.toolTip = "显示素材浏览区"
+            button.setAccessibilityLabel("显示素材浏览区")
+            button.setAccessibilityIdentifier("show-media-browser")
+
+            let accessory = NSTitlebarAccessoryViewController()
+            accessory.view = button
+            accessory.layoutAttribute = .right
+            sidebarAccessory = accessory
+            window.addTitlebarAccessoryViewController(accessory)
+        }
+
+        let symbol = browserOnRight ? "sidebar.right" : "sidebar.left"
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "显示素材浏览区")
+    }
+
+    private func removeSidebarAccessory(from window: NSWindow) {
+        guard let sidebarAccessory,
+              let index = window.titlebarAccessoryViewControllers.firstIndex(where: { $0 === sidebarAccessory })
+        else { return }
+        window.removeTitlebarAccessoryViewController(at: index)
+        self.sidebarAccessory = nil
+    }
+
+    @objc private func showBrowserPane() {
+        showBrowser?()
     }
 }
 

@@ -101,16 +101,7 @@ struct TransportBar: View {
             .focusable(false)
             .help("全屏")
         }
-        .padding(10)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .opacity(0.85)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-        }
+        .frame(minHeight: 42)
         .transaction { $0.animation = nil }
     }
 

@@ -21,35 +21,7 @@ struct MainView: View {
         .background {
             ZStack {
                 DockGlassBackground()
-                Color(red: 0.10, green: 0.36, blue: 0.96)
-                    .opacity(0.035)
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.00, green: 0.78, blue: 0.94).opacity(0.11),
-                        .clear,
-                    ],
-                    center: .topLeading,
-                    startRadius: 0,
-                    endRadius: 900
-                )
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.08, green: 0.40, blue: 1.00).opacity(0.09),
-                        .clear,
-                    ],
-                    center: .bottomLeading,
-                    startRadius: 0,
-                    endRadius: 950
-                )
-                RadialGradient(
-                    colors: [
-                        Color(red: 0.53, green: 0.18, blue: 0.95).opacity(0.12),
-                        .clear,
-                    ],
-                    center: .bottomTrailing,
-                    startRadius: 0,
-                    endRadius: 1_050
-                )
+                Color.black.opacity(0.13)
             }
             .ignoresSafeArea()
         }
@@ -57,21 +29,6 @@ struct MainView: View {
             handleDrop(urls)
         }
         .clipFlowInput()
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                if !env.isBrowserVisible {
-                    Button {
-                        env.isBrowserVisible = true
-                    } label: {
-                        Image(systemName: env.browserOnRight ? "sidebar.right" : "sidebar.left")
-                    }
-                    .focusable(false)
-                    .help("显示素材浏览区")
-                    .accessibilityLabel("显示素材浏览区")
-                }
-            }
-        }
-        .toolbarBackground(.hidden, for: .windowToolbar)
         .onAppear {
             env.applyWindowChrome()
         }
@@ -96,12 +53,12 @@ struct MainView: View {
                 .opacity(0.45)
 
             TransportBar(controller: env.playback)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
                 .background {
-                        Rectangle()
-                            .fill(.thinMaterial)
-                        .opacity(0.85)
+                    Rectangle()
+                        .fill(.thinMaterial)
+                        .opacity(0.88)
                 }
         }
         .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
@@ -109,10 +66,10 @@ struct MainView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             Image(systemName: "film.stack")
-                .font(.system(size: 30, weight: .light))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(.tertiary)
             VStack(spacing: 4) {
                 Text("打开视频开始浏览")
                     .font(.headline)
@@ -128,14 +85,7 @@ struct MainView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
         }
-        .padding(.horizontal, 28)
-        .padding(.vertical, 22)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.24), radius: 24, y: 10)
+        .padding(20)
     }
 
     private var splitter: some View {

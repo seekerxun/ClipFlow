@@ -16,8 +16,6 @@ struct MediaBrowserView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             sortBar
-                .padding(.horizontal, 12)
-                .padding(.bottom, 10)
             Divider()
                 .opacity(0.45)
             if env.showsGrid {
@@ -45,14 +43,16 @@ struct MediaBrowserView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            countLabel
+        HStack(spacing: 10) {
+            Text("素材")
+                .font(.system(.headline, design: .rounded, weight: .semibold))
+            countBadge
             Spacer(minLength: 0)
             Button {
                 env.showSearch()
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .frame(width: 22, height: 22)
+                    .frame(width: 24, height: 24)
                     .foregroundStyle(env.isSearchVisible ? Color.accentColor : Color.secondary)
             }
             .buttonStyle(.plain)
@@ -70,6 +70,7 @@ struct MediaBrowserView: View {
             .buttonStyle(.plain)
             .focusable(false)
             .help(env.browserOnRight ? "移到左侧" : "移到右侧")
+            .accessibilityLabel(env.browserOnRight ? "素材浏览区移到左侧" : "素材浏览区移到右侧")
             Button {
                 env.isBrowserVisible = false
             } label: {
@@ -80,20 +81,23 @@ struct MediaBrowserView: View {
             .help("收起素材浏览区")
             .accessibilityLabel("收起素材浏览区")
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 16)
+        .frame(height: 48)
     }
 
-    private var countLabel: some View {
+    private var countBadge: some View {
         let query = env.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = query.isEmpty
-            ? "\(env.items.count) 个视频"
-            : "\(env.displayedItems.count) / \(env.items.count) 个视频"
+            ? "\(env.items.count)"
+            : "\(env.displayedItems.count) / \(env.items.count)"
         return Text(text)
-            .font(.system(.callout, design: .rounded, weight: .medium))
-            .foregroundStyle(.primary.opacity(0.82))
+            .font(.system(.caption, design: .rounded, weight: .semibold))
+            .foregroundStyle(.secondary)
             .monospacedDigit()
+            .padding(.horizontal, 8)
+            .frame(minHeight: 24)
+            .background(.quaternary, in: Capsule())
+            .accessibilityLabel(query.isEmpty ? "\(env.items.count) 个视频" : "\(env.displayedItems.count)，共 \(env.items.count) 个视频")
     }
 
     private var searchBar: some View {
@@ -132,7 +136,7 @@ struct MediaBrowserView: View {
 
     private var sortBar: some View {
         @Bindable var env = env
-        return HStack(spacing: 8) {
+        return HStack(spacing: 6) {
             Picker("排序", selection: $env.sort) {
                 ForEach(BrowserSort.allCases) { item in
                     Text(item.title).tag(item)
@@ -150,10 +154,12 @@ struct MediaBrowserView: View {
                 HStack(spacing: 4) {
                     Image(systemName: env.sortAscending ? "arrow.up" : "arrow.down")
                     Text(env.sortAscending ? "正序" : "反序")
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .medium))
                 }
-                .frame(minWidth: 58)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
             .controlSize(.small)
             .fixedSize()
             .focusable(false)
@@ -161,6 +167,10 @@ struct MediaBrowserView: View {
             .accessibilityLabel(env.sortAscending ? "正序" : "反序")
             .accessibilityHint("切换排序方向")
         }
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .frame(height: 38)
     }
 
     private var layoutPicker: some View {
@@ -169,7 +179,7 @@ struct MediaBrowserView: View {
             layoutButton(grid: true, symbol: "square.grid.2x2", label: "网格")
         }
         .padding(2)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("浏览方式")
     }
@@ -180,7 +190,7 @@ struct MediaBrowserView: View {
             env.showsGrid = grid
         } label: {
             Image(systemName: symbol)
-                .frame(width: 22, height: 18)
+                .frame(width: 24, height: 22)
                 .background(
                     selected
                         ? Color.accentColor.opacity(0.22)
