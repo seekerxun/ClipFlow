@@ -16,8 +16,6 @@ struct MediaBrowserView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             sortBar
-            Divider()
-                .opacity(0.45)
             if env.showsGrid {
                 MediaGridView()
             } else {
@@ -176,6 +174,19 @@ struct MediaBrowserView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 16)
         .frame(height: 28)
+        // 两条线都贴在排序行边缘，不参与布局高度；16pt 内缩与行内控件对齐。
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(height: 1)
+                .padding(.horizontal, 16)
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(height: 1)
+                .padding(.horizontal, 16)
+        }
     }
 
     private var layoutPicker: some View {
