@@ -164,7 +164,7 @@ V0 实测 `screenshot` 命令必挂。**一律用 `mpv_command_async`**，别留
 ```
 --vo=libmpv           交给 render API，绝不能让 mpv 自己开窗
 --idle=yes            空闲时保持实例存活
---keep-open=yes       播完不退出，由 end-file 事件驱动自动下一个
+--keep-open=yes       播完不退出，由 eof-reached 状态驱动自动下一个
 --hr-seek=yes         精确 seek，拖动进度条不跳关键帧
 --cache=yes
 --hwdec=auto-safe     macOS 上会走 videotoolbox
@@ -172,7 +172,7 @@ V0 实测 `screenshot` 命令必挂。**一律用 `mpv_command_async`**，别留
 --input-default-bindings=no / --input-vo-keyboard=no   键盘归 SwiftUI
 ```
 
-`keep-open` 是必须的，否则播放结束会直接销毁窗口。自动播放下一个通过监听 `end-file` 事件自行控制，不交给 mpv 的 playlist。
+`keep-open` 是必须的，否则播放结束会直接销毁窗口。这个模式会保留最后一帧、不会立刻发 `end-file`，所以自动播放下一个以 `eof-reached` 属性为准；加载失败再由 `end-file` 兜底，不交给 mpv 的 playlist。
 
 ### 切换速度
 

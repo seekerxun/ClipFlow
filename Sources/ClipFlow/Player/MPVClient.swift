@@ -8,6 +8,7 @@ import Foundation
 final class MPVClient {
 
     private var handle: OpaquePointer?
+    private var hasReportedPlaybackEnd = false
 
     /// 事件回调全部保证在主线程。
     var onFileLoaded: (() -> Void)?
@@ -26,6 +27,7 @@ final class MPVClient {
     // MARK: - 生命周期
 
     func create() -> Bool {
+        hasReportedPlaybackEnd = false
         handle = mpv_create()
         return handle != nil
     }
@@ -44,6 +46,8 @@ final class MPVClient {
         observe("volume", MPV_FORMAT_DOUBLE)
         observe("speed", MPV_FORMAT_DOUBLE)
         observe("container-fps", MPV_FORMAT_DOUBLE)
+        // keep-open 会保留最后一帧，不会立刻卸载文件；真正的片尾要看这个属性。
+        observe("eof-reached", MPV_FORMAT_FLAG)
 
         mpv_set_wakeup_callback(handle, { ctx in
             guard let ctx else { return }
@@ -151,6 +155,7 @@ final class MPVClient {
     private func dispatch(_ ev: UnsafeMutablePointer<mpv_event>, _ id: mpv_event_id) {
         switch id {
         case MPV_EVENT_FILE_LOADED:
+            hasReportedPlaybackEnd = false
             onFileLoaded?()
 
         case MPV_EVENT_END_FILE:
@@ -160,7 +165,7 @@ final class MPVClient {
             }
             // STOP 是 loadfile 替换当前文件，不是播完。
             if reason == MPV_END_FILE_REASON_EOF || reason == MPV_END_FILE_REASON_ERROR {
-                onEndFile?()
+                reportPlaybackEndIfNeeded()
             }
 
         case MPV_EVENT_PROPERTY_CHANGE:
@@ -172,7 +177,15 @@ final class MPVClient {
             case MPV_FORMAT_DOUBLE:
                 onPropertyChange?(name, .double(data.assumingMemoryBound(to: Double.self).pointee))
             case MPV_FORMAT_FLAG:
-                onPropertyChange?(name, .flag(data.assumingMemoryBound(to: Int32.self).pointee != 0))
+                let value = data.assumingMemoryBound(to: Int32.self).pointee != 0
+                if name == "eof-reached" {
+                    if value {
+                        reportPlaybackEndIfNeeded()
+                    } else {
+                        hasReportedPlaybackEnd = false
+                    }
+                }
+                onPropertyChange?(name, .flag(value))
             default:
                 break
             }
@@ -180,5 +193,12 @@ final class MPVClient {
         default:
             break
         }
+    }
+
+    /// eof-reached 与 END_FILE 在部分路径上都会到，单次播放只上报一次。
+    private func reportPlaybackEndIfNeeded() {
+        guard !hasReportedPlaybackEnd else { return }
+        hasReportedPlaybackEnd = true
+        onEndFile?()
     }
 }

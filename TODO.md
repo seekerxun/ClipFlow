@@ -146,7 +146,7 @@ V0 的验证代码在 [`Spike/`](Spike/)，是独立的轻量工程。播放已�
 - [x] `PlaybackController`（`@Observable`），单实例 + `loadfile`
 - [x] 启动参数：`--vo=libmpv --idle=yes --keep-open=yes --hr-seek=yes --cache=yes`
 - [x] 所有 mpv 命令走 `mpv_command_async`（同步版本会死锁）
-- [x] 监听 `end-file` 事件驱动自动播放下一个（不用 mpv 的 playlist）
+- [x] 监听 `eof-reached` 驱动自动播放下一个，`end-file` 兜底加载失败（不用 mpv 的 playlist）
 - [x] 播放 / 暂停 / seek / 音量 / 静音 / 倍速
 - [x] “播放”菜单动态覆盖显示比例：原始 / 1:1 / 4:3 / 3:2 / 16:9 / 9:16
 - [x] “播放”菜单 / `R` 画面顺时针旋转：每次 90°，0° / 90° / 180° / 270° 循环
