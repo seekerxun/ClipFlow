@@ -211,6 +211,20 @@ final class PlaybackController {
         onFileChanged?(url)
     }
 
+    /// 列表已经没有当前文件时，释放 mpv 持有的文件句柄并立即清空控制条状态。
+    func unloadFile() {
+        pendingURL = nil
+        currentURL = nil
+        frameTimeline = nil
+        isLoaded = false
+        currentTime = 0
+        duration = 0
+        frameRate = 0
+        isPaused = true
+        clearABLoop()
+        mpv.stop()
+    }
+
     func play() {
         mpv.setFlag("pause", false)
         isPaused = false

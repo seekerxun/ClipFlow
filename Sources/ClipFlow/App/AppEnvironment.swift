@@ -303,8 +303,14 @@ final class AppEnvironment {
             return
         }
         if previousSelected != nil {
-            playback.pause()
             selectedID = nil
+            if let first = displayedItems.first {
+                select(first)
+            } else {
+                selectionAnchorID = nil
+                playback.unloadFile()
+            }
+            return
         }
         if wasEmpty, let first = displayedItems.first {
             select(first)
@@ -500,6 +506,7 @@ final class AppEnvironment {
             select(nextItem)
         } else {
             selectionAnchorID = nil
+            playback.unloadFile()
         }
     }
 

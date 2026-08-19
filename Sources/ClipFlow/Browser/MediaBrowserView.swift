@@ -180,11 +180,12 @@ struct MediaBrowserView: View {
                     }
                 }
             } label: {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 13, weight: .medium))
+                Image(nsImage: makeSortDirectionImage(ascending: env.sortAscending))
                     .frame(width: 20, height: 18)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .id(env.sortAscending)
             .help("排序：\(env.sort.title)，\(env.sortAscending ? "正序" : "反序")")
             .accessibilityLabel("排序")
             .accessibilityValue("\(env.sort.title)，\(env.sortAscending ? "正序" : "反序")")
@@ -201,6 +202,31 @@ struct MediaBrowserView: View {
                 .frame(height: 1)
                 .padding(.horizontal, 16)
         }
+    }
+
+    private func makeSortDirectionImage(ascending: Bool) -> NSImage {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        guard let symbol = NSImage(
+            systemSymbolName: "line.3.horizontal.decrease",
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(configuration) else {
+            return NSImage()
+        }
+
+        let image = NSImage(size: symbol.size, flipped: false) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.saveGState()
+            defer { context.restoreGState() }
+            if ascending {
+                context.translateBy(x: rect.midX, y: rect.midY)
+                context.rotate(by: .pi)
+                context.translateBy(x: -rect.midX, y: -rect.midY)
+            }
+            symbol.draw(in: rect)
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 
     private var layoutPicker: some View {

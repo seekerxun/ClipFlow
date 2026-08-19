@@ -82,6 +82,10 @@ final class MPVClient {
         command(["loadfile", path])
     }
 
+    func stop() {
+        command(["stop"])
+    }
+
     func seek(relative seconds: Double, exact: Bool = false) {
         command(["seek", String(seconds), exact ? "relative+exact" : "relative"])
     }

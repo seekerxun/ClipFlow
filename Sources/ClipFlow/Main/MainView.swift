@@ -45,6 +45,7 @@ struct MainView: View {
             ZStack {
                 PlayerView(controller: env.playback)
                 if env.items.isEmpty {
+                    Color.black
                     emptyState
                 }
             }
