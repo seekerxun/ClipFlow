@@ -24,6 +24,11 @@ enum BrowserSort: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class AppEnvironment {
+    private struct DeletionTarget: Sendable {
+        let id: String
+        let url: URL
+    }
+
     private enum Pref {
         static let sidebarWidth = "sidebarWidth"
         static let browserOnRight = "browserOnRight"
@@ -502,19 +507,37 @@ final class AppEnvironment {
         deleteItems(ids: selectedIDs)
     }
 
-    /// “删除”采用移到废纸篓；失败的文件保留在列表，避免用户误以为已经删掉。
+    /// 先尝试移到废纸篓；SMB 等没有废纸篓的位置必须再次确认后才永久删除。
     func deleteItems(ids: Set<String>) {
         let targets = items.filter { ids.contains($0.id) }
         guard !targets.isEmpty else { return }
-        let files = targets.map { (id: $0.id, url: $0.url) }
+        let files = targets.map { DeletionTarget(id: $0.id, url: $0.url) }
 
         Task { @MainActor in
-            let result = await Task.detached {
-                var deletedIDs: Set<String> = []
-                var failures: [String] = []
+            let trashResult = await Task.detached {
+                var trashedIDs: Set<String> = []
+                var withoutTrash: [DeletionTarget] = []
                 for file in files {
                     do {
                         _ = try FileManager.default.trashItem(at: file.url, resultingItemURL: nil)
+                        trashedIDs.insert(file.id)
+                    } catch {
+                        withoutTrash.append(file)
+                    }
+                }
+                return (trashedIDs, withoutTrash)
+            }.value
+
+            removeItemsFromList(ids: trashResult.0)
+            guard !trashResult.1.isEmpty else { return }
+            guard await confirmPermanentDeletion(trashResult.1) else { return }
+
+            let permanentResult = await Task.detached {
+                var deletedIDs: Set<String> = []
+                var failures: [String] = []
+                for file in trashResult.1 {
+                    do {
+                        try FileManager.default.removeItem(at: file.url)
                         deletedIDs.insert(file.id)
                     } catch {
                         failures.append("\(file.url.lastPathComponent)：\(error.localizedDescription)")
@@ -523,11 +546,43 @@ final class AppEnvironment {
                 return (deletedIDs, failures)
             }.value
 
-            removeItemsFromList(ids: result.0)
-            if !result.1.isEmpty {
-                presentDeletionFailures(result.1)
+            removeItemsFromList(ids: permanentResult.0)
+            if !permanentResult.1.isEmpty {
+                presentDeletionFailures(permanentResult.1)
             }
         }
+    }
+
+    private func confirmPermanentDeletion(_ files: [DeletionTarget]) async -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = files.count == 1
+            ? "无法移到废纸篓，要永久删除吗？"
+            : "有 \(files.count) 个视频无法移到废纸篓，要永久删除吗？"
+
+        var lines = files.prefix(5).map { $0.url.lastPathComponent }
+        if files.count > 5 {
+            lines.append("另有 \(files.count - 5) 个视频")
+        }
+        alert.informativeText = "远程共享等位置可能没有废纸篓。\n\n"
+            + lines.joined(separator: "\n")
+            + "\n\n永久删除后无法恢复。"
+
+        alert.addButton(withTitle: "取消")
+        let deleteButton = alert.addButton(withTitle: "永久删除")
+        deleteButton.hasDestructiveAction = true
+
+        let response: NSApplication.ModalResponse
+        if let hostWindow {
+            response = await withCheckedContinuation { continuation in
+                alert.beginSheetModal(for: hostWindow) { result in
+                    continuation.resume(returning: result)
+                }
+            }
+        } else {
+            response = alert.runModal()
+        }
+        return response == .alertSecondButtonReturn
     }
 
     private func presentDeletionFailures(_ failures: [String]) {
