@@ -30,17 +30,13 @@ enum KeyBindings {
             env.playback.exitFullscreen()
             return true
         case 123: // left
-            env.playback.seek(by: -5)
-            return true
+            return seekOrStep(env, seconds: -5, frames: -1)
         case 124: // right
-            env.playback.seek(by: 5)
-            return true
+            return seekOrStep(env, seconds: 5, frames: 1)
         case 126: // up
-            env.playback.seek(by: -30)
-            return true
+            return seekOrStep(env, seconds: -30, frames: -10)
         case 125: // down
-            env.playback.seek(by: 30)
-            return true
+            return seekOrStep(env, seconds: 30, frames: 10)
         case 116: // pageUp
             env.selectOffset(-1, wrap: false)
             return true
@@ -68,17 +64,15 @@ enum KeyBindings {
             env.selectOffset(1, wrap: false)
             return true
         case "a":
-            env.playback.seek(by: -5)
-            return true
+            return seekOrStep(env, seconds: -5, frames: -1)
         case "d":
-            env.playback.seek(by: 5)
-            return true
+            return seekOrStep(env, seconds: 5, frames: 1)
         case "w":
-            env.playback.seek(by: -30)
-            return true
+            return seekOrStep(env, seconds: -30, frames: -10)
         case "s":
-            env.playback.seek(by: 30)
-            return true
+            return seekOrStep(env, seconds: 30, frames: 10)
+        case "g":
+            return once(event) { env.toggleFrameStepMode() }
         case "f":
             return once(event) { env.playback.toggleFullscreen() }
         case "l":
@@ -100,6 +94,17 @@ enum KeyBindings {
         default:
             return false
         }
+    }
+
+    /// 前后跳转。逐帧模式下同一批键改成按帧走，长按仍可连步。
+    @MainActor
+    private static func seekOrStep(_ env: AppEnvironment, seconds: Double, frames: Int) -> Bool {
+        if env.playback.isFrameStepMode {
+            env.playback.stepFrame(by: frames)
+        } else {
+            env.playback.seek(by: seconds)
+        }
+        return true
     }
 
     @MainActor

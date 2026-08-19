@@ -51,7 +51,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.seekerxun.ClipFlow
         PRODUCT_NAME: ClipFlow
         INFOPLIST_FILE: Sources/ClipFlow/Resources/Info.plist
-        CURRENT_PROJECT_VERSION: 42
+        CURRENT_PROJECT_VERSION: 43
         MARKETING_VERSION: "0.1.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_OBJC_BRIDGING_HEADER: Sources/ClipFlow/Resources/ClipFlow-Bridging-Header.h

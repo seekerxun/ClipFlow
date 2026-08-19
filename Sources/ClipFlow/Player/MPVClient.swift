@@ -43,6 +43,7 @@ final class MPVClient {
         observe("mute", MPV_FORMAT_FLAG)
         observe("volume", MPV_FORMAT_DOUBLE)
         observe("speed", MPV_FORMAT_DOUBLE)
+        observe("container-fps", MPV_FORMAT_DOUBLE)
 
         mpv_set_wakeup_callback(handle, { ctx in
             guard let ctx else { return }
@@ -81,12 +82,22 @@ final class MPVClient {
         command(["loadfile", path])
     }
 
-    func seek(relative seconds: Double) {
-        command(["seek", String(seconds), "relative"])
+    func seek(relative seconds: Double, exact: Bool = false) {
+        command(["seek", String(seconds), exact ? "relative+exact" : "relative"])
     }
 
-    func seek(absolute seconds: Double) {
-        command(["seek", String(seconds), "absolute"])
+    func seek(absolute seconds: Double, exact: Bool = false) {
+        command(["seek", String(seconds), exact ? "absolute+exact" : "absolute"])
+    }
+
+    /// 前进一帧。mpv 会顺手把播放停下来。
+    func frameStep() {
+        command(["frame-step"])
+    }
+
+    /// 后退一帧。内部靠精确定位实现，比前进慢，个别文件可能差一帧。
+    func frameBackStep() {
+        command(["frame-back-step"])
     }
 
     /// 写属性也走 async 命令，避免同步 `mpv_set_property` 踩到同一类互等。

@@ -55,11 +55,22 @@ final class PlaybackController {
     private(set) var loopB: Double?
     private(set) var isLoaded: Bool = false
     private(set) var isFullscreen: Bool = false
+    /// 逐帧模式：进度条按帧计数，前后键改成一帧一帧地走。
+    /// 只在本次使用期间有效，重开应用回到关闭。
+    private(set) var isFrameStepMode: Bool = false
+    /// 文件报的帧率。0 表示还不知道（没加载完或者拿不到）。
+    private(set) var frameRate: Double = 0
+    /// 当前文件的逐帧时间表，由 `AppEnvironment` 在逐帧模式下读进来。
+    /// 还没读到之前先按帧率估。
+    private(set) var frameTimeline: FrameTimeline?
 
     /// 当前文件自然播完。单个循环不会走到这里。
     /// 上层根据 `loopMode` 决定：列表循环则换下一项（末尾回到第一项）；
     /// 关闭则也可自动下一个，但不回头。
     @ObservationIgnored var onPlaybackEnded: (() -> Void)?
+
+    /// 真正开始放某个文件了。等渲染就绪的那次排队加载也会走到这里。
+    @ObservationIgnored var onFileChanged: ((URL) -> Void)?
 
     // MARK: - 内部
 
@@ -69,6 +80,7 @@ final class PlaybackController {
     @ObservationIgnored private var isRenderReady = false
     @ObservationIgnored private var fullscreenObservers: [NSObjectProtocol] = []
     @ObservationIgnored private var abSeekPending = false
+    @ObservationIgnored private var currentURL: URL?
 
     init() {
         let defaults = UserDefaults.standard
@@ -125,6 +137,7 @@ final class PlaybackController {
         mpv.setFlag("mute", isMuted)
         mpv.setDouble("speed", speed)
         applyLoopFileOption()
+        applyFrameStepOptions()
         return true
     }
 
@@ -187,10 +200,15 @@ final class PlaybackController {
         isLoaded = false
         currentTime = 0
         duration = 0
+        frameRate = 0
+        currentURL = url
+        frameTimeline = nil
         clearABLoop()
         mpv.loadFile(url.path(percentEncoded: false))
-        mpv.setFlag("pause", false)
-        isPaused = false
+        // 逐帧模式是拿来一帧一帧看的，换片后停在开头，不自动播。
+        mpv.setFlag("pause", isFrameStepMode)
+        isPaused = isFrameStepMode
+        onFileChanged?(url)
     }
 
     func play() {
@@ -214,6 +232,87 @@ final class PlaybackController {
     func seek(by seconds: Double) {
         mpv.seek(relative: seconds)
     }
+
+    // MARK: - 逐帧
+
+    /// 有时间表，或者帧率时长都拿到了，才谈得上帧号。
+    var hasFrameInfo: Bool { frameTimeline != nil || (frameRate > 0 && duration > 0) }
+
+    /// 总帧数。有时间表就是准数，没有就按时长乘帧率估。
+    var frameCount: Int {
+        if let frameTimeline { return frameTimeline.count }
+        guard frameRate > 0, duration > 0 else { return 0 }
+        return max(Int((duration * frameRate).rounded()), 1)
+    }
+
+    /// 当前帧号，从 0 开始数。
+    var currentFrame: Int { frameIndex(at: currentTime) }
+
+    func frameIndex(at time: Double) -> Int {
+        if let frameTimeline { return frameTimeline.index(at: time) }
+        guard frameRate > 0, time.isFinite, time > 0 else { return 0 }
+        return max(Int((time * frameRate).rounded()), 0)
+    }
+
+    /// 帧号对应的定位时间。目标落在上一帧和这一帧中间，理由见 `FrameTimeline`。
+    func time(forFrame index: Int) -> Double {
+        if let frameTimeline { return frameTimeline.seekTime(forFrame: index) }
+        guard frameRate > 0 else { return 0 }
+        return max(Double(index) - 0.5, 0) / frameRate
+    }
+
+    func setFrameStepMode(_ enabled: Bool) {
+        guard isFrameStepMode != enabled else { return }
+        isFrameStepMode = enabled
+        applyFrameStepOptions()
+        if enabled { pause() }
+    }
+
+    func toggleFrameStepMode() {
+        setFrameStepMode(!isFrameStepMode)
+    }
+
+    /// 逐帧时关掉精确定位的丢帧优化：留着的话后退一帧容易落错位置。
+    private func applyFrameStepOptions() {
+        mpv.setString("hr-seek-framedrop", isFrameStepMode ? "no" : "yes")
+    }
+
+    /// 步进若干帧，正数往后负数往前。步进一律停在暂停状态。
+    func stepFrame(by count: Int) {
+        guard count != 0 else { return }
+        if !isPaused { pause() }
+        // 单帧交给 mpv 自己的帧步进，比自己算时间准。
+        if count == 1 { mpv.frameStep(); return }
+        if count == -1 { mpv.frameBackStep(); return }
+        if frameTimeline != nil {
+            // 属性推送有延迟，跨多帧跳之前直接问一次当前时间。
+            let now = currentPlaybackTime() ?? currentTime
+            seek(toFrame: frameIndex(at: now) + count)
+            return
+        }
+        guard frameRate > 0 else {
+            // 帧率不明，退回走一帧。
+            if count > 0 { mpv.frameStep() } else { mpv.frameBackStep() }
+            return
+        }
+        mpv.seek(relative: Double(count) / frameRate, exact: true)
+    }
+
+    /// 进度条按帧拖动、跨多帧跳转时用。
+    func seek(toFrame index: Int) {
+        guard hasFrameInfo else { return }
+        let clamped = min(max(index, 0), max(frameCount - 1, 0))
+        mpv.seek(absolute: time(forFrame: clamped), exact: true)
+    }
+
+    /// 收下读好的逐帧时间表。中途换过文件的话这份就作废了。
+    func applyFrameTimeline(_ timeline: FrameTimeline?, for url: URL) {
+        guard currentURL == url else { return }
+        frameTimeline = timeline
+    }
+
+    /// 当前正在放的文件。逐帧时间表要按它去读。
+    var loadedURL: URL? { currentURL }
 
     func setVolume(_ value: Double) {
         let clamped = min(max(value, 0), 100)
@@ -392,12 +491,18 @@ final class PlaybackController {
             case ("mute", .flag(let v)): isMuted = v
             case ("volume", .double(let v)): volume = v
             case ("speed", .double(let v)): speed = v
+            case ("container-fps", .double(let v)): frameRate = v
             default: break
             }
         }
 
         mpv.onFileLoaded = { [weak self] in
-            self?.isLoaded = true
+            guard let self else { return }
+            isLoaded = true
+            // 有的文件不会推帧率的属性变化，加载完主动问一次。
+            if frameRate <= 0, let fps = mpv.double("container-fps"), fps > 0 {
+                frameRate = fps
+            }
         }
 
         mpv.onEndFile = { [weak self] in

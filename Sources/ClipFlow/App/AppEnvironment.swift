@@ -75,6 +75,7 @@ final class AppEnvironment {
     @ObservationIgnored private var folderRoots: [URL] = []
     @ObservationIgnored private var looseFiles: [URL] = []
     @ObservationIgnored private var sourceTask: Task<Void, Never>?
+    @ObservationIgnored private var frameTimelineTask: Task<Void, Never>?
 
     var selectedItem: MediaItem? {
         items.first { $0.id == selectedID }
@@ -106,6 +107,9 @@ final class AppEnvironment {
         }
         playback.onPlaybackEnded = { [weak self] in
             self?.handlePlaybackEnded()
+        }
+        playback.onFileChanged = { [weak self] _ in
+            self?.loadFrameTimelineIfNeeded()
         }
         let defaults = UserDefaults.standard
         if defaults.object(forKey: Pref.sidebarWidth) != nil {
@@ -383,6 +387,30 @@ final class AppEnvironment {
         selectedID = item.id
         shouldScrollToSelection = scroll
         playback.loadFile(item.url)
+    }
+
+    // MARK: - 逐帧
+
+    /// 逐帧模式开关。开的时候顺手把当前文件的逐帧时间表读进来。
+    func toggleFrameStepMode() {
+        playback.toggleFrameStepMode()
+        loadFrameTimelineIfNeeded()
+    }
+
+    /// 逐帧模式下读一次当前文件每一帧的时间。关着模式、或者已经读到了就不读。
+    ///
+    /// 放在这里而不是播放控制器里，是因为读表要起后台任务，而这个类本来就在主线程上。
+    private func loadFrameTimelineIfNeeded() {
+        frameTimelineTask?.cancel()
+        guard playback.isFrameStepMode,
+              playback.frameTimeline == nil,
+              let url = playback.loadedURL
+        else { return }
+        frameTimelineTask = Task { @MainActor in
+            let timeline = try? await FrameTimeline.load(url)
+            guard !Task.isCancelled else { return }
+            playback.applyFrameTimeline(timeline, for: url)
+        }
     }
 
     func selectOffset(_ delta: Int, wrap: Bool) {

@@ -8,6 +8,8 @@ struct TransportBar: View {
 
     @State private var isScrubbing = false
     @State private var scrubTime: Double = 0
+    /// 逐帧模式下拖动进度条时按帧记，不从时间反推，免得四舍五入差一帧。
+    @State private var scrubFrame: Int = 0
     @State private var hoverTime: Double?
     @State private var hoverX: CGFloat?
     @State private var sliderWidth: CGFloat = 0
@@ -29,11 +31,12 @@ struct TransportBar: View {
             .focusable(false)
             .help(playPauseHelp)
 
-            Text("\(DisplayFormat.duration(displayTime)) / \(DisplayFormat.duration(controller.duration))")
-                .font(.system(.caption, design: .monospaced, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(.primary.opacity(0.82))
-                .frame(minWidth: 92, alignment: .leading)
+            if controller.isFrameStepMode {
+                frameStepButton(symbol: "backward.frame.fill", delta: -1, help: "上一帧（A / ←）")
+                frameStepButton(symbol: "forward.frame.fill", delta: 1, help: "下一帧（D / →）")
+            }
+
+            positionLabel
 
             timelineSlider
                 .frame(minWidth: 120, maxWidth: .infinity)
@@ -79,6 +82,18 @@ struct TransportBar: View {
             .help("倍速")
 
             Button {
+                env.toggleFrameStepMode()
+            } label: {
+                Image(systemName: "film")
+                    .foregroundStyle(controller.isFrameStepMode ? Color.accentColor : .secondary)
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .help(controller.isFrameStepMode ? "退出逐帧模式（G）" : "逐帧模式（G）")
+
+            Button {
                 controller.cycleLoopMode()
             } label: {
                 Image(systemName: controller.loopMode.symbolName)
@@ -106,25 +121,7 @@ struct TransportBar: View {
     }
 
     private var timelineSlider: some View {
-        Slider(
-            value: Binding(
-                get: { isScrubbing ? scrubTime : controller.currentTime },
-                set: { newValue in
-                    scrubTime = newValue
-                    controller.seek(to: newValue)
-                }
-            ),
-            in: 0...max(controller.duration, 0.01),
-            onEditingChanged: { editing in
-                if editing {
-                    scrubTime = controller.currentTime
-                }
-                isScrubbing = editing
-                if !editing {
-                    controller.seek(to: scrubTime)
-                }
-            }
-        )
+        sliderCore
         .disabled(!controller.isLoaded || controller.duration <= 0)
         .focusable(false)
         .controlSize(.small)
@@ -163,6 +160,104 @@ struct TransportBar: View {
         .task(id: previewLoadID) {
             loadPreviewImages()
         }
+    }
+
+    /// 逐帧模式且拿得到帧率时，进度条一格就是一帧。
+    private var isFrameTimeline: Bool {
+        controller.isFrameStepMode && controller.frameCount > 1
+    }
+
+    @ViewBuilder
+    private var sliderCore: some View {
+        if isFrameTimeline {
+            Slider(
+                value: Binding(
+                    get: { Double(displayFrame) },
+                    set: { newValue in
+                        scrubFrame = Int(newValue.rounded())
+                        scrubTime = controller.time(forFrame: scrubFrame)
+                        controller.seek(toFrame: scrubFrame)
+                    }
+                ),
+                in: 0...Double(max(controller.frameCount - 1, 1)),
+                step: 1,
+                onEditingChanged: handleScrubbing
+            )
+        } else {
+            Slider(
+                value: Binding(
+                    get: { isScrubbing ? scrubTime : controller.currentTime },
+                    set: { newValue in
+                        scrubTime = newValue
+                        controller.seek(to: newValue)
+                    }
+                ),
+                in: 0...max(controller.duration, 0.01),
+                onEditingChanged: handleScrubbing
+            )
+        }
+    }
+
+    private func handleScrubbing(_ editing: Bool) {
+        if editing {
+            scrubTime = controller.currentTime
+            scrubFrame = controller.currentFrame
+        }
+        isScrubbing = editing
+        if !editing {
+            if isFrameTimeline {
+                controller.seek(toFrame: scrubFrame)
+            } else {
+                controller.seek(to: scrubTime)
+            }
+        }
+    }
+
+    private func frameStepButton(symbol: String, delta: Int, help: String) -> some View {
+        Button {
+            controller.stepFrame(by: delta)
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 12))
+                .frame(width: 26, height: 32)
+                .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .disabled(!controller.isLoaded)
+        .focusable(false)
+        .help(help)
+    }
+
+    /// 播放位置文本。逐帧模式报帧号，时间挪到悬停提示里。
+    @ViewBuilder
+    private var positionLabel: some View {
+        Text(positionText)
+            .font(.system(.caption, design: .monospaced, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(.primary.opacity(0.82))
+            .frame(minWidth: controller.isFrameStepMode ? 104 : 92, alignment: .leading)
+            .help(positionHelp)
+    }
+
+    private var positionText: String {
+        guard controller.isFrameStepMode else {
+            return "\(DisplayFormat.duration(displayTime)) / \(DisplayFormat.duration(controller.duration))"
+        }
+        guard controller.hasFrameInfo else { return "帧 — / —" }
+        return "帧 \(displayFrame) / \(controller.frameCount)"
+    }
+
+    private var positionHelp: String {
+        guard controller.isFrameStepMode else { return "" }
+        guard controller.hasFrameInfo else { return "这个文件读不到帧率，只能按时间走" }
+        return String(
+            format: "%.2fs / %.2fs　%g fps",
+            displayTime, controller.duration, controller.frameRate
+        )
+    }
+
+    private var displayFrame: Int {
+        isScrubbing ? scrubFrame : controller.currentFrame
     }
 
     private var displayTime: Double {

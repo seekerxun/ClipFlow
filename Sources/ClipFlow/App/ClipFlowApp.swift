@@ -350,7 +350,8 @@ private struct ClipFlowCommands: Commands {
         // 菜单比窗口先建好，这里顺手把「开一扇新窗口」的能力交给 `SessionHub`，
         // 让它在一扇窗口都没有的时候也能开出第一扇。
         let _ = SessionHub.shared.captureMainOpener { openWindow(id: "main") }
-        return CommandGroup(replacing: .newItem) {
+        // 这里不能写 `return`：写了之后面那组菜单就成了永远走不到的死代码。
+        CommandGroup(replacing: .newItem) {
             Button("新建窗口") {
                 openWindow(id: "main")
             }
@@ -375,6 +376,12 @@ private struct ClipFlowCommands: Commands {
             Button("素材浏览区在右侧") {
                 env?.browserOnRight = true
                 env?.isBrowserVisible = true
+            }
+            .disabled(env == nil)
+            Divider()
+            // G 同样由窗口收键处理，这里不再绑快捷键。
+            Button(env?.playback.isFrameStepMode == true ? "退出逐帧模式" : "逐帧模式") {
+                env?.toggleFrameStepMode()
             }
             .disabled(env == nil)
             Divider()
