@@ -85,6 +85,8 @@ enum KeyBindings {
             return once(event) { env.toggleFrameStepMode() }
         case "f":
             return once(event) { env.playback.toggleWindowZoom() }
+        case "r":
+            return once(event) { env.playback.rotateVideoClockwise() }
         case "l":
             return once(event) { env.playback.cycleLoopMode() }
         case "m":

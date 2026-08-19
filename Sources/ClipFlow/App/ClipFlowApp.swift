@@ -376,6 +376,24 @@ private struct ClipFlowCommands: Commands {
 
             Divider()
 
+            Picker("显示比例", selection: Binding(
+                get: { env?.playback.videoAspectRatio ?? .original },
+                set: { env?.playback.setVideoAspectRatio($0) }
+            )) {
+                ForEach(VideoAspectRatioPreset.allCases, id: \.self) { preset in
+                    Text(preset.title).tag(preset)
+                }
+            }
+            .disabled(env == nil)
+
+            Button("顺时针旋转 90°") {
+                env?.playback.rotateVideoClockwise()
+            }
+            .keyboardShortcut("r", modifiers: [])
+            .disabled(env == nil)
+
+            Divider()
+
             Toggle("逐帧模式", isOn: Binding(
                 get: { env?.playback.isFrameStepMode ?? false },
                 set: { _ in env?.toggleFrameStepMode() }
